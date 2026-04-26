@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Real DB credentials live in DATA_DIR/dbconfig.php (outside webroot).
+# Never commit a populated dbconfig.php to the repo.
+dbconfig.php
+
+# Local upload/runtime artifacts (should be under DATA_DIR, not the repo)
+uploads/
+upload_errors.log
+.uploads_size_cache
+
+# Editor / OS
+Thumbs.db
+*.swp
+.idea/
+.vscode/

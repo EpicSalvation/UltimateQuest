@@ -1,0 +1,101 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project overview
+
+"The Ultimate Quest" — a PHP web app for a church youth scavenger-hunt event. Teams log in with a PIN, submit photo/video evidence for numbered tasks, and admins approve or reject submissions from a dashboard. There is no build step and no package manager; this is plain PHP that runs on a shared-hosting LAMP stack (A2/hosting.com "Drive Web Hosting", PHP 8.1, MySQL).
+
+## Runtime & deployment shape
+
+- **Deployed under a URL prefix.** The repo root is served at `<host>/UltimateQuest/`. The prefix is centralized as the `BASE_URL` constant in `lib/config.php`; every internal link, redirect, `<form action>`, `<link>`, and inline JS path uses `<?=BASE_URL?>` or the JS `BASE` constant. Never hardcode `/UltimateQuest/` in new code.
+- **PHP configuration** lives in `.user.ini` (300M upload / 320M post / 512M memory, 300s exec) — needed for video uploads.
+- **Data directory is outside the webroot.** `DATA_DIR` defaults to `/home/thestarv/UltimateQuestData` in `lib/config.php`. All uploads, the rejection archive, and `dbconfig.php` live there — not in the repo.
+- **Database credentials** live in `DATA_DIR/dbconfig.php` (outside webroot). It defines `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`, and may override `BASE_URL`. `lib/config.php` requires it; absence will fatal.
+- **Timezone is pinned** to `America/New_York` in `lib/config.php` and re-asserted on user-facing pages. Event start/end and all timestamps assume Eastern.
+
+## Storage model — MySQL
+
+State lives in MySQL (InnoDB, utf8mb4). Schema is in `lib/schema.sql` and gets applied by `migrate.php`. Tables:
+
+- `teams(id, name UNIQUE, display_name, pin_hash, created_at)` — `name` is the lowercased-underscored slug; `display_name` is what users see; `pin_hash` is `password_hash`'d.
+- `tasks(id, title, description, points, photos_required, videos_required, sort_order, created_at)`.
+- `submissions(id, team_id FK CASCADE, task_id FK CASCADE, status ENUM('pending','approved','rejected'), note, submitted_at, reviewed_at)` with `UNIQUE(team_id, task_id)` and `KEY(status, submitted_at)`. One row per team/task — resubmission updates the existing row.
+- `submission_files(id, submission_id FK CASCADE, filename, mime_type, byte_size, has_thumb, created_at)`.
+- `settings(k VARCHAR(64) PK, v TEXT)` — holds `event_start_time`, `event_end_time`, `reveal_leaderboard`, `admin_password_hash`. Read with `setting($k, $default)`, write with `set_setting($k, $v)` (both in `lib/dbx.php`).
+
+**Scores are derived, never stored.** The old `score_awarded`/`score_pending` columns are gone. Every page that needs a score computes it inline:
+
+```sql
+SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END) AS score
+SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END) AS pending
+```
+
+If you find yourself caching a score, stop — the join is cheap and drift is the bug we deliberately removed.
+
+**DB access** is `db()` from `lib/dbx.php` — singleton PDO with `ERRMODE_EXCEPTION`, `FETCH_ASSOC`, `EMULATE_PREPARES=false`. Always use prepared statements; never string-interpolate user input.
+
+**Resubmission flow** (`task_submit.php`) inside one transaction:
+1. Move existing files from `uploads/<team>/<task_id>/` to `uploads/<team>/rejections/<task_id>_<ts>/` (including the `thumbs/` subdir).
+2. `DELETE FROM submission_files WHERE submission_id = ?`.
+3. `UPDATE submissions SET status='pending', note=NULL, submitted_at=NOW(), reviewed_at=NULL`.
+4. Insert new `submission_files` rows.
+
+## Thumbnails
+
+Admin previews load thumbnails, not full files — this is the main perceived-speed lever. `lib/thumbs.php` provides `generate_thumb($src, $dest, $mime)`:
+
+- JPEG/PNG/WebP via GD, resized to 400px wide, JPEG q80, with EXIF orientation handling.
+- HEIC/HEIF via Imagick when the HEIC delegate is present (`thumbs_can_heic()` static-cached). When unavailable, `has_thumb=false` is recorded; admin UI shows an "Open full file" link for that file.
+- Videos are not thumbnailed; admin modal lazy-loads `<video preload="metadata">` only after the user expands a tile.
+
+Thumbs are written to `uploads/<team>/<task_id>/thumbs/<filename>.jpg` (extension always replaced with `.jpg`, see `thumb_path_for()`). Generation is synchronous in `task_submit.php` after `move_uploaded_file`; failures log to `upload_errors.log` and are non-fatal. `api/thumb.php` is admin-gated and serves them with a 1h private cache.
+
+## Request flow
+
+- **Team:** `index.php` → `login.php` (PIN → `password_verify` against `teams.pin_hash`) → `team.php` (lists tasks with per-team status; derives score; renders countdown from `settings.event_start_time`/`event_end_time`) → `task_submit.php` (multi-file upload via XHR with `upload.onprogress` updating a `<progress>` overlay).
+- **Admin:** `admin/index.php` (password vs `settings.admin_password_hash`) → `admin/dashboard.php`. Dashboard polls `api/get_pending.php` (10s), `api/get_teams.php` (15s), `api/get_tasks.php` (20s); mutations go to `api/approve.php`, `api/reject.php`, `api/add_task.php`, `api/edit_task.php`, `api/delete_task.php`. `admin/status.php` is the read-only health/metrics page (auto-refresh 15s).
+- **Media:** uploads under `DATA_DIR/uploads/<team>/<task_id>/` are outside the webroot. `api/file.php` (admin-only) streams full files; `api/thumb.php` (admin-only) streams thumbs. New media UI must use one of these.
+- **Auth gates:** every page/endpoint starts with `require_once lib/auth.php` and calls `require_team()` or `require_admin()`. These redirect (via `BASE_URL`) on failure rather than returning errors. Match this pattern for new endpoints.
+
+## Auth specifics
+
+- Admin password is hashed once and stored in `settings.admin_password_hash`. `try_admin_login` reads it and `password_verify`s — no per-request hashing.
+- Team PINs are hashed with `password_hash` at team-creation time in the admin UI; `try_team_login` `password_verify`s.
+- Sessions use `samesite=Lax`, `httponly`, `path=BASE_URL.'/'`. Login regenerates the session ID.
+
+## Conventions worth preserving
+
+- Team `name` is the canonical lowercased-underscored slug (`normalize_team_name()` in `lib/auth.php`); `display_name` is what users see. URLs and disk paths use `name`.
+- Task IDs are auto-increment integers from `tasks.id`.
+- Cache-bust `<link rel=stylesheet>` with `?v=<?=@filemtime(__DIR__.'/style.css')?>` (relative to the file itself — no DOCUMENT_ROOT lookups).
+- Upload MIME allowlist + extension fallback for `application/octet-stream` lives in `task_submit.php`. Phones send HEIC or octet-stream often; both the allowlist and the extension fallback are load-bearing — keep them.
+- Rejection archive layout is `uploads/<team>/rejections/<task_id>_<YmdHis>/` (and includes the prior `thumbs/` subdir). Admins know this path.
+
+## Running locally
+
+No test suite, lint config, or build. To iterate:
+
+1. Make the repo serve under `/UltimateQuest/` (Apache alias, or set `BASE_URL` in `dbconfig.php` to match wherever you serve it from).
+2. Create the `DATA_DIR` (or edit `lib/config.php`) and put a `dbconfig.php` in it with `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` constants.
+3. Create the MySQL database, then visit `migrate.php` once. It applies `lib/schema.sql`, prompts for an admin password, seeds default `settings`, and archives any pre-existing JSON files into `archive/<ts>/`. The page can self-gate (first-run anonymous, then admin-only).
+4. Log in as admin and use the dashboard to set event start/end times and create teams + tasks.
+
+## Status / diagnostics
+
+`admin/status.php` is the read-only health page intended to stay open during the event:
+
+- Environment: PHP version, upload/post/memory/exec limits, extension pills (pdo_mysql, gd, imagick, fileinfo, mbstring, exif), Imagick HEIC delegate presence, writability of `DATA_DIR`/`uploads/`.
+- Storage: `disk_free_space`/`disk_total_space`, recursive total bytes under `uploads/` (cached 60s in `.uploads_size_cache` to avoid hammering shared-host IO), top-5 largest `submission_files`.
+- Database: server version, row counts, submission status breakdown.
+- Live game metrics: median review latency (`TIMESTAMPDIFF(SECOND, submitted_at, reviewed_at)`), oldest pending age (computed in SQL, not PHP — `TIMESTAMPDIFF` against `MIN(submitted_at) WHERE status='pending'`), approval rate, thumb-failure rate by mime.
+- Per-team and per-task tables; tail of `upload_errors.log`.
+
+The "oldest pending age" and "thumb failure rate" tiles are the leading indicators during the event.
+
+## Things to watch out for
+
+- `task_submit.php`'s `xhr.upload.onprogress` is the only reliable mobile-Safari upload-progress path; don't rewrite it as `fetch` streams.
+- Don't denormalize scores. If you need them in a query result, derive them via the SUM/CASE pattern above.
+- `api/file.php` and `api/thumb.php` validate the team/task path components against the DB — preserve that when modifying. Path traversal here would expose the entire data dir.
+- `migrate.php` should be deletable (or env-gated) after first run; it runs DDL and sets the admin password.

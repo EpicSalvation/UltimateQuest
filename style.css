@@ -1,0 +1,385 @@
+/* The Ultimate Quest — global styles
+ *
+ * Theming: html[data-theme="..."] sets the palette via CSS custom properties.
+ * Default ("quest") matches the original animated purple→pink→blue gradient.
+ * Other themes (sunset, ocean, meadow, light, dark) override the variables
+ * below. Pick one in admin/settings.php.
+ */
+
+:root {
+    --pad: 16px;
+    --gap: 12px;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+    /* Quest theme is the implicit default */
+    --bg: linear-gradient(135deg, #7F00FF, #E100FF, #00C9FF);
+    --bg-anim: gradientShift 10s ease infinite;
+    --text: #222;
+    --heading: #4B0082;
+    --heading-shadow: 1px 1px 2px rgba(255, 255, 255, 0.6);
+    --card-bg: rgba(255, 255, 255, 0.85);
+    --card-border: rgba(0, 0, 0, 0.15);
+    --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    --accent: #0a6;
+    --accent-text: #fff;
+    --secondary: #555;
+    --link: #0a6;
+    --progress-track: rgba(255, 255, 255, 0.6);
+    --progress-bar: linear-gradient(90deg, #00C9FF, #7F00FF);
+    --modal-content-bg: #fff;
+    --modal-content-text: #222;
+    --scrim: rgba(0, 0, 0, 0.6);
+
+    color-scheme: light;
+}
+
+/* --- Theme overrides ----------------------------------------------------- */
+
+html[data-theme="sunset"] {
+    --bg: linear-gradient(135deg, #FF6E40, #FF1744, #FFB700);
+    --heading: #7a1f08;
+    --progress-bar: linear-gradient(90deg, #FFB700, #FF1744);
+}
+
+html[data-theme="ocean"] {
+    --bg: linear-gradient(135deg, #001F3F, #0077B6, #00B4D8);
+    --heading: #002a4d;
+    --progress-bar: linear-gradient(90deg, #00B4D8, #001F3F);
+}
+
+html[data-theme="meadow"] {
+    --bg: linear-gradient(135deg, #264E36, #4F9D52, #A0D468);
+    --heading: #1a4f2a;
+    --progress-bar: linear-gradient(90deg, #A0D468, #264E36);
+}
+
+html[data-theme="light"] {
+    --bg: #f4f5fa;
+    --bg-anim: none;
+    --heading: #2a2f5f;
+    --heading-shadow: none;
+    --card-bg: #fff;
+    --card-border: rgba(0, 0, 0, 0.10);
+    --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    --progress-track: rgba(0, 0, 0, 0.08);
+    --progress-bar: linear-gradient(90deg, #0a6, #2a2f5f);
+}
+
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #16161e;
+    --bg-anim: none;
+    --text: #e7e7ee;
+    --heading: #c2b6ff;
+    --heading-shadow: none;
+    --card-bg: #20212e;
+    --card-border: rgba(255, 255, 255, 0.08);
+    --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --accent: #4cd99a;
+    --accent-text: #0a1f15;
+    --secondary: #444656;
+    --link: #8bd9ff;
+    --progress-track: rgba(255, 255, 255, 0.08);
+    --progress-bar: linear-gradient(90deg, #8bd9ff, #c2b6ff);
+    --modal-content-bg: #20212e;
+    --modal-content-text: #e7e7ee;
+    --scrim: rgba(0, 0, 0, 0.75);
+}
+
+/* --- Base layout --------------------------------------------------------- */
+
+* { box-sizing: border-box; }
+
+html {
+    min-height: 100%;
+    background: var(--bg);
+    background-size: 200% 200%;
+    animation: var(--bg-anim);
+}
+
+@keyframes gradientShift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+}
+
+.container {
+    margin: 0 auto;
+    max-width: 780px;
+    padding: var(--pad);
+}
+
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    padding: var(--pad);
+    margin: var(--gap) 0;
+    box-shadow: var(--card-shadow);
+}
+
+h1, h2 {
+    color: var(--heading);
+    text-align: center;
+    text-shadow: var(--heading-shadow);
+    margin: 0 0 8px 0;
+}
+
+.bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--gap);
+    gap: 8px;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap);
+}
+
+@media (max-width:600px) {
+    .grid-2 { grid-template-columns: 1fr; }
+}
+
+.big {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid color-mix(in oklab, canvastext 15%, canvas 85%);
+}
+
+.row:last-child { border-bottom: none; }
+
+label { display: block; margin: 8px 0; }
+
+input, button, select, textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid color-mix(in oklab, canvastext 20%, canvas 80%);
+    border-radius: 10px;
+    background: canvas;
+    color: canvastext;
+}
+
+button {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+button.secondary {
+    background: var(--secondary);
+    color: var(--accent-text);
+}
+
+.inline { display: inline; }
+.center { text-align: center; }
+
+.small { font-size: .9rem; opacity: .8; }
+
+a {
+    color: var(--link);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.alert {
+    padding: 10px;
+    border-radius: 10px;
+    background: color-mix(in oklab, #fae27c 50%, canvas 50%);
+    border: 1px solid #d2b200;
+    color: canvastext;
+}
+
+.success {
+    background: color-mix(in oklab, #9ff0b1 60%, canvas 40%);
+    border-color: #1f9f4a;
+}
+
+.error {
+    background: color-mix(in oklab, #ffb3b3 60%, canvas 40%);
+    border-color: #cc3a3a;
+}
+
+.logo-wrapper { text-align: center; margin-bottom: 1em; }
+.logo-wrapper img { max-height: 300px; max-width: 80%; height: auto; }
+
+/* --- Progress bar -------------------------------------------------------- */
+
+.progress-wrapper {
+    width: 100%;
+    height: 20px;
+    background: var(--progress-track);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 0 auto 10px auto;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.2);
+}
+
+.progress-bar {
+    height: 100%;
+    background: var(--progress-bar);
+    transition: width 0.8s ease;
+}
+
+/* --- Modal --------------------------------------------------------------- */
+
+.modal.hidden { display: none; }
+
+.modal {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: var(--scrim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modal-content {
+    background: var(--modal-content-bg);
+    color: var(--modal-content-text);
+    padding: 1em;
+    border-radius: 10px;
+    max-width: 700px;
+    width: 95%;
+    max-height: 90vh;
+    overflow: auto;
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.close {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 1.5em;
+    font-weight: bold;
+    color: var(--modal-content-text);
+    cursor: pointer;
+}
+
+.preview-img {
+    max-width: 100%;
+    margin: 5px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.preview-video {
+    width: 100%;
+    margin: 5px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+#reject-note { width: 100%; margin-top: 10px; }
+#reject-block.hidden { display: none; }
+
+/* --- Upload overlay ------------------------------------------------------ */
+
+#upload-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+}
+
+#upload-overlay:not(.hidden) {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.upload-message { text-align: center; max-width: 80%; }
+
+.spinner {
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid #fff;
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 1em;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Misc ---------------------------------------------------------------- */
+
+#teams-table table td,
+#teams-table table th { text-align: center; }
+#teams-table table th:first-child,
+#teams-table table td:first-child { text-align: left; }
+
+textarea.auto-expand {
+    resize: none;
+    overflow: hidden;
+    min-height: 2.5em;
+    transition: height 0.2s ease;
+    font-family: inherit;
+    font-size: 1em;
+    line-height: 1.4;
+}
+
+/* --- Theme picker (admin/settings.php) ----------------------------------- */
+
+.theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--gap);
+    margin: var(--gap) 0;
+}
+
+.theme-card {
+    cursor: pointer;
+    border: 2px solid var(--card-border);
+    border-radius: 12px;
+    padding: 8px;
+    background: var(--card-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: border-color .15s ease, transform .15s ease;
+}
+.theme-card:hover { transform: translateY(-2px); }
+.theme-card input[type="radio"] { width: auto; margin-right: 6px; vertical-align: middle; }
+.theme-card.selected { border-color: var(--accent); }
+
+.theme-swatch {
+    height: 80px;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+}
+.theme-swatch[data-preview="quest"]  { background: linear-gradient(135deg, #7F00FF, #E100FF, #00C9FF); }
+.theme-swatch[data-preview="sunset"] { background: linear-gradient(135deg, #FF6E40, #FF1744, #FFB700); }
+.theme-swatch[data-preview="ocean"]  { background: linear-gradient(135deg, #001F3F, #0077B6, #00B4D8); }
+.theme-swatch[data-preview="meadow"] { background: linear-gradient(135deg, #264E36, #4F9D52, #A0D468); }
+.theme-swatch[data-preview="light"]  { background: #f4f5fa; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.theme-swatch[data-preview="dark"]   { background: #16161e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
