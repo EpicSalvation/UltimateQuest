@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
     $end    = $_POST['end_time']   ?? '';
     $reveal = isset($_POST['reveal_leaderboard']);
     $min_mandatory = max(0, intval($_POST['mandatory_min_required'] ?? 0));
+    $help_phone    = trim((string)($_POST['help_phone'] ?? ''));
+    $help_phone    = trim(preg_replace('/[^0-9+()\-.\s]/', '', $help_phone));
 
     $start_dt = DateTime::createFromFormat('Y-m-d\TH:i', $start, new DateTimeZone('America/New_York'));
     $end_dt   = DateTime::createFromFormat('Y-m-d\TH:i', $end,   new DateTimeZone('America/New_York'));
@@ -31,6 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
         set_setting('event_end_time',           $end_dt->format('Y-m-d H:i:s'));
         set_setting('reveal_leaderboard',       $reveal ? '1' : '0');
         set_setting('mandatory_min_required',   (string)$min_mandatory);
+        set_setting('help_phone',               $help_phone);
         header('Location: ' . $_SERVER['REQUEST_URI']); exit;
     }
     $msg = 'Invalid date/time format.';
@@ -66,6 +69,7 @@ $start_str = setting('event_start_time');
 $end_str   = setting('event_end_time');
 $reveal    = setting('reveal_leaderboard') === '1';
 $min_mandatory_val = (int)(setting('mandatory_min_required') ?? 0);
+$help_phone_val    = (string)(setting('help_phone') ?? '');
 
 if ($start_str) {
     $dt = DateTime::createFromFormat('Y-m-d H:i:s', $start_str, new DateTimeZone('America/New_York'));
@@ -148,6 +152,9 @@ if ($end_str) {
     </label>
     <label>Mandatory tasks required to qualify:
       <input type="number" name="mandatory_min_required" min="0" value="<?=$min_mandatory_val?>">
+    </label>
+    <label>Help phone number (shown to teams):
+      <input type="tel" name="help_phone" value="<?=htmlspecialchars($help_phone_val)?>" placeholder="(555) 123-4567">
     </label>
     <button type="submit">Save Event Settings</button>
   </form>

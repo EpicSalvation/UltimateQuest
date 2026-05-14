@@ -16,17 +16,7 @@ $theme_meta = [
     'dark'   => ['label' => 'Dark',   'desc' => 'Dark mode for low-light review'],
 ];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_help_phone'])) {
-    csrf_check();
-    $raw = trim((string)($_POST['help_phone'] ?? ''));
-    // Keep digits, +, spaces, dashes, parens, dots — discard anything else.
-    $clean = preg_replace('/[^0-9+()\-.\s]/', '', $raw);
-    $clean = trim($clean);
-    set_setting('help_phone', $clean);
-    $msg = $clean === '' ? 'Help phone cleared.' : 'Help phone updated.';
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['theme'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $picked = (string)($_POST['theme'] ?? '');
     if (!in_array($picked, THEMES, true)) {
@@ -49,8 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['theme'])) {
     }
 }
 
-$current     = current_theme();
-$help_phone  = (string)(setting('help_phone') ?? '');
+$current = current_theme();
 ?>
 <!doctype html>
 <html<?=theme_html_attr()?>>
@@ -68,19 +57,6 @@ $help_phone  = (string)(setting('help_phone') ?? '');
 
 <?php if ($msg): ?><div class="alert success"><?=htmlspecialchars($msg)?></div><?php endif; ?>
 <?php if ($err): ?><div class="alert error"><?=htmlspecialchars($err)?></div><?php endif; ?>
-
-<div class="card">
-  <h2>Help Phone Number</h2>
-  <p class="small center">Optional. When set, teams see this number on their main page so they can call for help during the event.</p>
-  <form method="post">
-    <input type="hidden" name="_csrf" value="<?=htmlspecialchars(csrf_token())?>">
-    <input type="hidden" name="update_help_phone" value="1">
-    <label>Phone Number:
-      <input type="tel" name="help_phone" value="<?=htmlspecialchars($help_phone)?>" placeholder="(555) 123-4567">
-    </label>
-    <button type="submit">Save Help Phone</button>
-  </form>
-</div>
 
 <div class="card">
   <h2>Theme</h2>
