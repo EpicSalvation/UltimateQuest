@@ -131,6 +131,9 @@ $mandatory_pending   = count(array_filter($task_list, fn($t) => $t['mandatory'] 
 $mandatory_min       = (int)(setting('mandatory_min_required') ?? 0);
 if ($mandatory_min > $mandatory_total) $mandatory_min = $mandatory_total;
 $qualifies           = $mandatory_completed >= $mandatory_min;
+
+$help_phone = (string)(setting('help_phone') ?? '');
+$help_phone_tel = $help_phone !== '' ? preg_replace('/[^0-9+]/', '', $help_phone) : '';
 ?>
 <!doctype html>
 <html<?=theme_html_attr()?>>
@@ -248,6 +251,13 @@ $qualifies           = $mandatory_completed >= $mandatory_min;
     <?php endforeach; ?>
   </table>
 </div>
+
+<?php if ($help_phone !== ''): ?>
+<div class="card center" style="border:2px solid #c98a00;">
+  <p style="margin:0; font-weight:600;">📞 Need help?</p>
+  <p style="margin:6px 0 0;">Call <a href="tel:<?=htmlspecialchars($help_phone_tel)?>" style="font-size:1.2em; font-weight:700;"><?=htmlspecialchars($help_phone)?></a></p>
+</div>
+<?php endif; ?>
 
 <?php require __DIR__ . '/lib/theme_picker.php'; ?>
 
