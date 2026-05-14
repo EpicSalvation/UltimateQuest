@@ -132,8 +132,29 @@ $mandatory_min       = (int)(setting('mandatory_min_required') ?? 0);
 if ($mandatory_min > $mandatory_total) $mandatory_min = $mandatory_total;
 $qualifies           = $mandatory_completed >= $mandatory_min;
 
-$help_phone = (string)(setting('help_phone') ?? '');
-$help_phone_tel = $help_phone !== '' ? preg_replace('/[^0-9+]/', '', $help_phone) : '';
+$help_phone_raw = (string)(setting('help_phone') ?? '');
+$help_phone_tel = $help_phone_raw !== '' ? preg_replace('/[^0-9+]/', '', $help_phone_raw) : '';
+$help_phone = format_phone_display($help_phone_raw);
+
+function format_phone_display(string $raw): string {
+    $raw = trim($raw);
+    if ($raw === '') return '';
+    $digits = preg_replace('/\D/', '', $raw);
+    // US 10-digit: (NXX) NXX-XXXX
+    if (strlen($digits) === 10) {
+        return sprintf('(%s) %s-%s', substr($digits, 0, 3), substr($digits, 3, 3), substr($digits, 6));
+    }
+    // US 11-digit with country code 1: +1 (NXX) NXX-XXXX
+    if (strlen($digits) === 11 && $digits[0] === '1') {
+        return sprintf('+1 (%s) %s-%s', substr($digits, 1, 3), substr($digits, 4, 3), substr($digits, 7));
+    }
+    // 7-digit local: NXX-XXXX
+    if (strlen($digits) === 7) {
+        return substr($digits, 0, 3) . '-' . substr($digits, 3);
+    }
+    // Unknown shape (international, extension, etc.) — fall back to what was entered.
+    return $raw;
+}
 ?>
 <!doctype html>
 <html<?=theme_html_attr()?>>
