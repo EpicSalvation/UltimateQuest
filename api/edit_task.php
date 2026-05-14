@@ -14,6 +14,7 @@ $points      = intval($_POST['points'] ?? 0);
 $photos      = intval($_POST['photos'] ?? 0);
 $videos      = intval($_POST['videos'] ?? 0);
 $description = trim($_POST['description'] ?? '');
+$mandatory   = !empty($_POST['mandatory']) ? 1 : 0;
 
 if ($task_id <= 0 || !$title || $points <= 0) {
     echo json_encode(['success' => false, 'error' => 'Missing or invalid data']); exit;
@@ -21,10 +22,10 @@ if ($task_id <= 0 || !$title || $points <= 0) {
 
 $st = db()->prepare(
     'UPDATE tasks
-        SET title = ?, description = ?, points = ?, photos_required = ?, videos_required = ?
+        SET title = ?, description = ?, points = ?, photos_required = ?, videos_required = ?, mandatory = ?
       WHERE id = ?'
 );
-$st->execute([$title, $description, $points, $photos, $videos, $task_id]);
+$st->execute([$title, $description, $points, $photos, $videos, $mandatory, $task_id]);
 
 if ($st->rowCount() === 0) {
     // rowCount is 0 for unchanged rows too — verify existence explicitly.

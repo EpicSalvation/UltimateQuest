@@ -16,7 +16,23 @@ function db(): PDO {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+    ensure_schema_upgrades($pdo);
     return $pdo;
+}
+
+function ensure_schema_upgrades(PDO $pdo): void {
+    try {
+        $v = (int)($pdo->query("SELECT v FROM settings WHERE k='db_schema_v'")->fetchColumn() ?: 1);
+        if ($v < 2) {
+            $col = $pdo->query("SHOW COLUMNS FROM tasks LIKE 'mandatory'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE tasks ADD COLUMN mandatory TINYINT(1) NOT NULL DEFAULT 0 AFTER videos_required");
+            }
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','2') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
+    } catch (Throwable $e) {
+        // Non-fatal: app continues; admin can re-run migrate.php if needed.
+    }
 }
 
 function setting(string $k, ?string $default = null): ?string {

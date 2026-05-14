@@ -21,14 +21,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
     $start  = $_POST['start_time'] ?? '';
     $end    = $_POST['end_time']   ?? '';
     $reveal = isset($_POST['reveal_leaderboard']);
+    $min_mandatory = max(0, intval($_POST['mandatory_min_required'] ?? 0));
 
     $start_dt = DateTime::createFromFormat('Y-m-d\TH:i', $start, new DateTimeZone('America/New_York'));
     $end_dt   = DateTime::createFromFormat('Y-m-d\TH:i', $end,   new DateTimeZone('America/New_York'));
 
     if ($start_dt && $end_dt) {
-        set_setting('event_start_time',   $start_dt->format('Y-m-d H:i:s'));
-        set_setting('event_end_time',     $end_dt->format('Y-m-d H:i:s'));
-        set_setting('reveal_leaderboard', $reveal ? '1' : '0');
+        set_setting('event_start_time',         $start_dt->format('Y-m-d H:i:s'));
+        set_setting('event_end_time',           $end_dt->format('Y-m-d H:i:s'));
+        set_setting('reveal_leaderboard',       $reveal ? '1' : '0');
+        set_setting('mandatory_min_required',   (string)$min_mandatory);
         header('Location: ' . $_SERVER['REQUEST_URI']); exit;
     }
     $msg = 'Invalid date/time format.';
@@ -63,6 +65,7 @@ $end_val   = '';
 $start_str = setting('event_start_time');
 $end_str   = setting('event_end_time');
 $reveal    = setting('reveal_leaderboard') === '1';
+$min_mandatory_val = (int)(setting('mandatory_min_required') ?? 0);
 
 if ($start_str) {
     $dt = DateTime::createFromFormat('Y-m-d H:i:s', $start_str, new DateTimeZone('America/New_York'));
@@ -143,6 +146,9 @@ if ($end_str) {
       <span>Reveal Leaderboard</span>
       <input type="checkbox" name="reveal_leaderboard" <?=$reveal?'checked':''?> style="margin:0;">
     </label>
+    <label>Mandatory tasks required to qualify:
+      <input type="number" name="mandatory_min_required" min="0" value="<?=$min_mandatory_val?>">
+    </label>
     <button type="submit">Save Event Settings</button>
   </form>
 </div>
@@ -161,6 +167,9 @@ if ($end_str) {
     <label># Videos: <input type="number" name="videos" min="0" required></label>
     <label>Description:
       <textarea name="description" rows="1" class="auto-expand" placeholder="Enter task description…"></textarea>
+    </label>
+    <label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" name="mandatory" value="1"> Mandatory ⭐
     </label>
     <button type="submit">Add</button>
   </form>
@@ -240,6 +249,9 @@ if ($end_str) {
       <label># Videos: <input type="number" name="videos" min="0" required></label>
       <label>Description:
         <textarea name="description" rows="2" class="auto-expand"></textarea>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="mandatory" value="1"> Mandatory ⭐
       </label>
       <div class="center">
         <button type="submit">Save Changes</button>
@@ -408,15 +420,17 @@ async function loadTasks() {
              '<th style="text-align:center; padding:6px;">Points</th>' +
              '<th style="text-align:center; padding:6px;">Photos</th>' +
              '<th style="text-align:center; padding:6px;">Videos</th>' +
+             '<th style="text-align:center; padding:6px;">Mandatory</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
   for (const task of j.tasks) {
     html += `<tr style="border-bottom:1px solid rgba(0,0,0,0.1);">
       <td style="padding:6px;">${task.id}</td>
-      <td style="padding:6px;">${task.title}</td>
+      <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${task.title}</td>
       <td style="padding:6px; text-align:center;">${task.points}</td>
       <td style="padding:6px; text-align:center;">${task.photos}</td>
       <td style="padding:6px; text-align:center;">${task.videos}</td>
+      <td style="padding:6px; text-align:center;">${task.mandatory ? '⭐' : ''}</td>
       <td style="padding:6px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px;">
         <button class="edit-task-btn secondary" data-id="${task.id}">Edit</button>
         <button class="delete-task-btn secondary" data-id="${task.id}" data-title="${task.title}">Delete</button>
@@ -455,6 +469,7 @@ document.addEventListener('click', async (e) => {
   f.photos.value      = t.photos;
   f.videos.value      = t.videos;
   f.description.value = t.description || '';
+  f.mandatory.checked = !!t.mandatory;
   m.classList.remove('hidden');
 });
 

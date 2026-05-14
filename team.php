@@ -81,7 +81,7 @@ if ($end && $now > $end) {
 
 // Tasks LEFT JOIN this team's submissions; one row per task with status/note (or 'not_started').
 $st = db()->prepare(
-    "SELECT tk.id, tk.title, tk.points,
+    "SELECT tk.id, tk.title, tk.points, tk.mandatory,
             COALESCE(s.status, 'not_started') AS status,
             s.note
        FROM tasks tk
@@ -91,8 +91,9 @@ $st = db()->prepare(
 $st->execute([$team_id]);
 $task_list = $st->fetchAll();
 foreach ($task_list as &$t) {
-    $t['id']     = (int)$t['id'];
-    $t['points'] = (int)$t['points'];
+    $t['id']        = (int)$t['id'];
+    $t['points']    = (int)$t['points'];
+    $t['mandatory'] = (int)$t['mandatory'];
 }
 unset($t);
 
@@ -123,6 +124,13 @@ $approved_count = count(array_filter($task_list, fn($t) => $t['status'] === 'app
 $pending_count  = count(array_filter($task_list, fn($t) => $t['status'] === 'pending'));
 $rejected_count = count(array_filter($task_list, fn($t) => $t['status'] === 'rejected'));
 $progress_pct   = $total_tasks > 0 ? round(($approved_count / $total_tasks) * 100) : 0;
+
+$mandatory_total     = count(array_filter($task_list, fn($t) => $t['mandatory']));
+$mandatory_completed = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'approved'));
+$mandatory_pending   = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'pending'));
+$mandatory_min       = (int)(setting('mandatory_min_required') ?? 0);
+if ($mandatory_min > $mandatory_total) $mandatory_min = $mandatory_total;
+$qualifies           = $mandatory_completed >= $mandatory_min;
 ?>
 <!doctype html>
 <html<?=theme_html_attr()?>>
@@ -151,6 +159,31 @@ $progress_pct   = $total_tasks > 0 ? round(($approved_count / $total_tasks) * 10
   <p><strong>Score:</strong> <?=$awarded?> pts awarded<br>
   <strong>Pending:</strong> <?=$pending?> pts<br>
   <strong>Total:</strong> <?=$total?> pts</p>
+<?php if ($mandatory_total > 0): ?>
+  <?php
+    $mand_pct = $mandatory_min > 0
+        ? min(100, round(($mandatory_completed / $mandatory_min) * 100))
+        : 100;
+  ?>
+  <div class="mandatory-status" style="margin-top:12px; padding:10px; border-radius:8px; border:1px solid rgba(0,0,0,0.15); background:rgba(255,255,255,0.08);">
+    <p style="margin:0 0 6px; font-weight:600;">⭐ Mandatory Tasks</p>
+    <div class="progress-wrapper" style="margin:4px 0;">
+      <div class="progress-bar" style="width: <?=$mand_pct?>%; background:<?=$qualifies?'#2e7d32':'#c98a00'?>;"></div>
+    </div>
+    <p style="margin:6px 0 0;">
+      <strong><?=$mandatory_completed?></strong> of <strong><?=$mandatory_min?></strong> required completed
+      &nbsp;·&nbsp;
+      <span class="small"><?=$mandatory_total?> mandatory total<?php if ($mandatory_pending > 0): ?>, <?=$mandatory_pending?> pending<?php endif; ?></span>
+    </p>
+    <p style="margin:6px 0 0; font-weight:600; color:<?=$qualifies?'#2e7d32':'#c98a00'?>;">
+      <?php if ($qualifies): ?>
+        ✅ Your team qualifies!
+      <?php else: ?>
+        ⚠️ <?=($mandatory_min - $mandatory_completed)?> more mandatory task<?=($mandatory_min - $mandatory_completed)===1?'':'s'?> needed to qualify
+      <?php endif; ?>
+    </p>
+  </div>
+<?php endif; ?>
 <?php if ($start && $end && $now >= $start && $now <= $end):
   $diff = $end->getTimestamp() - $now->getTimestamp(); ?>
   <p style="margin:4px 0;"><strong>Time remaining in the game:</strong></p>
@@ -192,9 +225,17 @@ $progress_pct   = $total_tasks > 0 ? round(($approved_count / $total_tasks) * 10
         };
         $label = ucfirst(str_replace('_', ' ', $t['status']));
       ?>
-      <tr>
+      <tr<?= $t['mandatory'] ? ' class="mandatory-row" style="background:rgba(255,193,7,0.12);"' : '' ?>>
         <td class="center"><?=$t['id']?></td>
-        <td><strong><?=htmlspecialchars($t['title'])?></strong></td>
+        <td>
+          <?php if ($t['mandatory']): ?>
+            <span title="Mandatory task" style="color:#c98a00;">⭐</span>
+          <?php endif; ?>
+          <strong<?= $t['mandatory'] ? ' style="border-bottom:2px solid #c98a00;"' : '' ?>><?=htmlspecialchars($t['title'])?></strong>
+          <?php if ($t['mandatory']): ?>
+            <span class="small" style="color:#c98a00; font-weight:600;">(Mandatory)</span>
+          <?php endif; ?>
+        </td>
         <td class="center"><?=$t['points']?></td>
         <td class="center" style="color:<?=$color?>;font-weight:600;"><?=$label?></td>
         <td class="center">

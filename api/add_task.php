@@ -13,15 +13,16 @@ $points      = intval($_POST['points'] ?? 0);
 $photos      = intval($_POST['photos'] ?? 0);
 $videos      = intval($_POST['videos'] ?? 0);
 $description = trim($_POST['description'] ?? '');
+$mandatory   = !empty($_POST['mandatory']) ? 1 : 0;
 
 if (!$title || $points <= 0) {
     echo json_encode(['success' => false, 'error' => 'Title and positive points required']); exit;
 }
 
 $st = db()->prepare(
-    'INSERT INTO tasks (title, description, points, photos_required, videos_required, sort_order)
-     VALUES (?, ?, ?, ?, ?, COALESCE((SELECT max_o FROM (SELECT MAX(sort_order) AS max_o FROM tasks) x), 0) + 1)'
+    'INSERT INTO tasks (title, description, points, photos_required, videos_required, mandatory, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT max_o FROM (SELECT MAX(sort_order) AS max_o FROM tasks) x), 0) + 1)'
 );
-$st->execute([$title, $description, $points, $photos, $videos]);
+$st->execute([$title, $description, $points, $photos, $videos, $mandatory]);
 
 echo json_encode(['success' => true, 'message' => 'Task added successfully']);

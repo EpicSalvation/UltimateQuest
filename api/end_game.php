@@ -71,7 +71,7 @@ $file_stats = $pdo->query(
 )->fetch();
 
 $teams_dump          = $pdo->query("SELECT id, name, display_name, created_at FROM teams ORDER BY id")->fetchAll();
-$tasks_dump          = $pdo->query("SELECT id, title, description, points, photos_required, videos_required, sort_order, created_at FROM tasks ORDER BY sort_order, id")->fetchAll();
+$tasks_dump          = $pdo->query("SELECT id, title, description, points, photos_required, videos_required, mandatory, sort_order, created_at FROM tasks ORDER BY sort_order, id")->fetchAll();
 $submissions_dump    = $pdo->query("SELECT id, team_id, task_id, status, note, submitted_at, reviewed_at FROM submissions ORDER BY id")->fetchAll();
 $submission_files_dp = $pdo->query("SELECT id, submission_id, filename, mime_type, byte_size, has_thumb, created_at FROM submission_files ORDER BY id")->fetchAll();
 $settings_dump       = $pdo->query("SELECT k, v FROM settings WHERE k <> 'admin_password_hash' ORDER BY k")->fetchAll();
