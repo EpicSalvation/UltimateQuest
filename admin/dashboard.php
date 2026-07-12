@@ -26,6 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
     $help_phone    = trim(preg_replace('/[^0-9+()\-.\s]/', '', $help_phone));
     $help_phone2   = trim((string)($_POST['help_phone2'] ?? ''));
     $help_phone2   = trim(preg_replace('/[^0-9+()\-.\s]/', '', $help_phone2));
+    $help_phone_name  = trim((string)($_POST['help_phone_name'] ?? ''));
+    $help_phone2_name = trim((string)($_POST['help_phone2_name'] ?? ''));
 
     $start_dt = DateTime::createFromFormat('Y-m-d\TH:i', $start, new DateTimeZone('America/New_York'));
     $end_dt   = DateTime::createFromFormat('Y-m-d\TH:i', $end,   new DateTimeZone('America/New_York'));
@@ -37,6 +39,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
         set_setting('mandatory_min_required',   (string)$min_mandatory);
         set_setting('help_phone',               $help_phone);
         set_setting('help_phone2',              $help_phone2);
+        set_setting('help_phone_name',          $help_phone_name);
+        set_setting('help_phone2_name',         $help_phone2_name);
         header('Location: ' . $_SERVER['REQUEST_URI']); exit;
     }
     $msg = 'Invalid date/time format.';
@@ -72,8 +76,10 @@ $start_str = setting('event_start_time');
 $end_str   = setting('event_end_time');
 $reveal    = setting('reveal_leaderboard') === '1';
 $min_mandatory_val = (int)(setting('mandatory_min_required') ?? 0);
-$help_phone_val    = (string)(setting('help_phone') ?? '');
-$help_phone2_val   = (string)(setting('help_phone2') ?? '');
+$help_phone_val        = (string)(setting('help_phone') ?? '');
+$help_phone2_val       = (string)(setting('help_phone2') ?? '');
+$help_phone_name_val   = (string)(setting('help_phone_name') ?? '');
+$help_phone2_name_val  = (string)(setting('help_phone2_name') ?? '');
 
 if ($start_str) {
     $dt = DateTime::createFromFormat('Y-m-d H:i:s', $start_str, new DateTimeZone('America/New_York'));
@@ -157,8 +163,14 @@ if ($end_str) {
     <label>Mandatory tasks required to qualify:
       <input type="number" name="mandatory_min_required" min="0" value="<?=$min_mandatory_val?>">
     </label>
+    <label>Help contact 1 name (Optional &mdash; shown to teams):
+      <input type="text" name="help_phone_name" value="<?=htmlspecialchars($help_phone_name_val)?>" placeholder="Game host name">
+    </label>
     <label>Help phone number 1 (Optional &mdash; shown to teams):
       <input type="tel" name="help_phone" value="<?=htmlspecialchars($help_phone_val)?>" placeholder="(555) 123-4567">
+    </label>
+    <label>Help contact 2 name (Optional &mdash; shown to teams):
+      <input type="text" name="help_phone2_name" value="<?=htmlspecialchars($help_phone2_name_val)?>" placeholder="Game host name">
     </label>
     <label>Help phone number 2 (Optional &mdash; shown to teams):
       <input type="tel" name="help_phone2" value="<?=htmlspecialchars($help_phone2_val)?>" placeholder="(555) 123-4567">

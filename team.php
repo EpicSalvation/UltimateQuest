@@ -133,12 +133,13 @@ if ($mandatory_min > $mandatory_total) $mandatory_min = $mandatory_total;
 $qualifies           = $mandatory_completed >= $mandatory_min;
 
 $help_phones = [];
-foreach (['help_phone', 'help_phone2'] as $hp_key) {
+foreach ([['help_phone', 'help_phone_name'], ['help_phone2', 'help_phone2_name']] as [$hp_key, $name_key]) {
     $raw = (string)(setting($hp_key) ?? '');
     if (trim($raw) === '') continue;
     $help_phones[] = [
         'tel'     => preg_replace('/[^0-9+]/', '', $raw),
         'display' => format_phone_display($raw),
+        'name'    => trim((string)(setting($name_key) ?? '')),
     ];
 }
 
@@ -283,7 +284,7 @@ function format_phone_display(string $raw): string {
 <div class="card center" style="border:2px solid #c98a00;">
   <p style="margin:0; font-weight:600;">📞 Need help?</p>
   <?php foreach ($help_phones as $hp): ?>
-  <p style="margin:6px 0 0;">Call <a href="tel:<?=htmlspecialchars($hp['tel'])?>" style="font-size:1.2em; font-weight:700;"><?=htmlspecialchars($hp['display'])?></a></p>
+  <p style="margin:6px 0 0;">Call <?php if ($hp['name'] !== ''): ?><?=htmlspecialchars($hp['name'])?> at <?php endif; ?><a href="tel:<?=htmlspecialchars($hp['tel'])?>" style="font-size:1.2em; font-weight:700;"><?=htmlspecialchars($hp['display'])?></a></p>
   <?php endforeach; ?>
 </div>
 <?php endif; ?>

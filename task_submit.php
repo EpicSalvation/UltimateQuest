@@ -30,6 +30,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
         FILE_APPEND
     );
 
+    // Guard the host's hard POST cap. A body over the limit is silently
+    // discarded by PHP before this script runs — $_POST and $_FILES arrive
+    // empty even though the browser sent the bytes. Detect both the "too
+    // big" case (large Content-Length) and the resulting empty payload, and
+    // fail loudly instead of recording an empty submission.
+    $content_length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $body_discarded = empty($_FILES) && empty($_POST) && $content_length > 0;
+    if ($content_length > MAX_POST_BYTES || $body_discarded) {
+        $limit_mb = round(MAX_POST_BYTES / (1024 * 1024));
+        http_response_code(413);
+        header('Content-Type: text/plain; charset=utf-8');
+        exit("Your upload is too large. The total size of all files for one task must stay under {$limit_mb} MB. Please retake with lower resolution / shorter video, or submit fewer files, and try again.");
+    }
+
     $upload_dir = DATA_DIR . "/uploads/$team/$task_id";
     if (!is_dir($upload_dir)) mkdir($upload_dir, 0775, true);
 
@@ -207,11 +221,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
   const status  = document.getElementById('upload-status');
   const bytes   = document.getElementById('upload-bytes');
 
+  const MAX_POST_BYTES = <?=MAX_POST_BYTES?>;
+  const MAX_POST_MB    = Math.round(MAX_POST_BYTES / (1024 * 1024));
+
   function fmtMB(n) { return (n / (1024 * 1024)).toFixed(1) + ' MB'; }
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     if (form.classList.contains('submitting')) return;
+
+    // Reject over-limit uploads before sending. Over the host's POST cap the
+    // body is silently discarded server-side, so catch it here first.
+    let totalBytes = 0;
+    for (const input of form.querySelectorAll('input[type=file]')) {
+      for (const file of input.files) totalBytes += file.size;
+    }
+    if (totalBytes > MAX_POST_BYTES) {
+      alert(
+        'Your files total ' + fmtMB(totalBytes) + ', which is over the ' +
+        MAX_POST_MB + ' MB limit for one task.\n\n' +
+        'Please pick a lower-resolution photo or a shorter video (or fewer files) and try again.'
+      );
+      return;
+    }
+
     form.classList.add('submitting');
     overlay.classList.remove('hidden');
     status.textContent = 'Uploading…';
@@ -232,7 +265,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
       if (xhr.status >= 200 && xhr.status < 400) {
         window.location.href = '<?=BASE_URL?>/team.php';
       } else {
-        status.textContent = 'Upload failed (HTTP ' + xhr.status + '). Please try again.';
+        const msg = (xhr.responseText || '').trim();
+        status.textContent = msg || ('Upload failed (HTTP ' + xhr.status + '). Please try again.');
         form.classList.remove('submitting');
       }
     };
