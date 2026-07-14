@@ -11,6 +11,7 @@ $path = DATA_DIR . "/uploads/$team/$task/thumbs/$file";
 if (!is_file($path)) { http_response_code(404); exit('Not found'); }
 
 header('Content-Type: image/jpeg');
+header('X-Content-Type-Options: nosniff');
 header('Content-Length: ' . filesize($path));
 header('Cache-Control: private, max-age=3600');
 readfile($path);

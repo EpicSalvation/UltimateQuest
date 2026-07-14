@@ -101,7 +101,8 @@ if ($end_str) {
 <p class="center small">
   <a href="<?=BASE_URL?>/admin/status.php">📊 Site &amp; game status</a> &nbsp;·&nbsp;
   <a href="<?=BASE_URL?>/admin/settings.php">⚙️ Site settings</a> &nbsp;·&nbsp;
-  <a href="<?=BASE_URL?>/leaderboard.php">🏆 Leaderboard</a>
+  <a href="<?=BASE_URL?>/leaderboard.php">🏆 Leaderboard</a> &nbsp;·&nbsp;
+  <a href="<?=BASE_URL?>/admin/slideshow.php">🎞 Slideshow picks</a>
 </p>
 
 <div class="card" id="pending-card">
@@ -287,6 +288,24 @@ if ($end_str) {
 const BASE = '<?=BASE_URL?>';
 const CSRF = document.querySelector('meta[name=csrf-token]').content;
 
+// Escape untrusted strings (team/task names) before they hit innerHTML.
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// Non-blocking notification — replaces alert() so reviewing doesn't stall
+// on an extra click after every approve/reject.
+function toast(msg, isError = false) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (isError ? ' toast-error' : '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add('show'), 10);
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 400); }, 2600);
+}
+
 function jsonPost(url, body) {
   return fetch(url, {
     method: 'POST',
@@ -350,11 +369,11 @@ async function loadQueue() {
     const key = `${i.team}|${i.task_id}`;
     const checked = selectedItems.has(key) ? 'checked' : '';
     html += `<tr>
-      <td style="padding:6px;"><input type="checkbox" class="bulk-row" data-key="${key}" data-team="${i.team}" data-task="${i.task_id}" ${checked}></td>
-      <td style="padding:6px;">${i.team}</td>
-      <td style="padding:6px;">${i.task}</td>
-      <td style="padding:6px;">${i.submitted_at} ET</td>
-      <td style="padding:6px;"><button data-team="${i.team}" data-task="${i.task_id}" class="view-btn">👁 View</button></td>
+      <td style="padding:6px;"><input type="checkbox" class="bulk-row" data-key="${esc(key)}" data-team="${esc(i.team)}" data-task="${i.task_id}" ${checked}></td>
+      <td style="padding:6px;">${esc(i.team)}</td>
+      <td style="padding:6px;">${esc(i.task)}</td>
+      <td style="padding:6px;">${esc(i.submitted_at)} ET</td>
+      <td style="padding:6px;"><button data-team="${esc(i.team)}" data-task="${i.task_id}" class="view-btn">👁 View</button></td>
     </tr>`;
   }
   html += '</table>';
@@ -396,7 +415,7 @@ async function bulkReview(action, note = '') {
   if (selectedItems.size === 0) return;
   const items = [...selectedItems.values()];
   const j = await jsonPost(`${BASE}/api/bulk_review.php`, { action, items, note });
-  alert(j.message || (j.success ? 'Done' : 'Failed'));
+  toast(j.message || (j.success ? 'Done' : 'Failed'), !j.success);
   selectedItems.clear();
   loadQueue(); loadTeams(); loadTasks();
 }
@@ -417,15 +436,15 @@ async function loadTeams() {
              '</tr>';
   for (const team of j.teams) {
     html += `<tr>
-      <td style="padding:6px;">${team.name}</td>
+      <td style="padding:6px;">${esc(team.name)}</td>
       <td style="padding:6px; text-align:center;">${team.score_awarded}</td>
       <td style="padding:6px; text-align:center;">${team.score_pending}</td>
       <td style="padding:6px; text-align:center;">${team.penalty_outstanding > 0 ? '−' + team.penalty_outstanding : '0'}</td>
       <td style="padding:6px; text-align:center;"><strong>${team.score_net}</strong></td>
       <td style="padding:6px; text-align:center;">
-        <form method="post" style="display:inline" onsubmit="return confirm('Delete team ${team.name}?');">
-          <input type="hidden" name="_csrf" value="${CSRF}">
-          <input type="hidden" name="delete_team" value="${team.name}">
+        <form method="post" style="display:inline" onsubmit="return confirm('Delete team ' + this.delete_team.value + '?');">
+          <input type="hidden" name="_csrf" value="${esc(CSRF)}">
+          <input type="hidden" name="delete_team" value="${esc(team.name)}">
           <button type="submit" class="secondary">Delete</button>
         </form>
       </td>
@@ -435,10 +454,13 @@ async function loadTeams() {
   teamsTable.innerHTML = html;
 }
 
+let lastTasks = []; // cached from loadTasks so the edit modal opens instantly
+
 async function loadTasks() {
   const r = await fetch(`${BASE}/api/get_tasks.php`);
   const j = await r.json();
   if (!j.success) { tasksTable.textContent = j.error || 'Error loading tasks'; return; }
+  lastTasks = j.tasks || [];
   if (!j.tasks || j.tasks.length === 0) { tasksTable.textContent = 'No tasks found.'; return; }
   let html = '<table style="width:100%; border-collapse:collapse;">' +
              '<tr>' +
@@ -454,7 +476,7 @@ async function loadTasks() {
   for (const task of j.tasks) {
     html += `<tr style="border-bottom:1px solid rgba(0,0,0,0.1);">
       <td style="padding:6px;">${task.id}</td>
-      <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${task.title}</td>
+      <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${esc(task.title)}</td>
       <td style="padding:6px; text-align:center;">${task.points}</td>
       <td style="padding:6px; text-align:center;">${task.penalty > 0 ? '−' + task.penalty : ''}</td>
       <td style="padding:6px; text-align:center;">${task.photos}</td>
@@ -462,7 +484,7 @@ async function loadTasks() {
       <td style="padding:6px; text-align:center;">${task.mandatory ? '⭐' : ''}</td>
       <td style="padding:6px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px;">
         <button class="edit-task-btn secondary" data-id="${task.id}">Edit</button>
-        <button class="delete-task-btn secondary" data-id="${task.id}" data-title="${task.title}">Delete</button>
+        <button class="delete-task-btn secondary" data-id="${task.id}" data-title="${esc(task.title)}">Delete</button>
       </td>
     </tr>`;
   }
@@ -477,18 +499,15 @@ async function loadTasks() {
 async function deleteTask(taskId, taskTitle) {
   if (!confirm(`Delete task "${taskTitle}"?`)) return;
   const j = await fieldPost(`${BASE}/api/delete_task.php`, { task_id: taskId });
-  if (j.success) { alert(j.message || 'Task deleted!'); loadTasks(); }
-  else           { alert(j.error || 'Failed to delete task.'); }
+  if (j.success) { toast(j.message || 'Task deleted!'); loadTasks(); }
+  else           { toast(j.error || 'Failed to delete task.', true); }
 }
 
-document.addEventListener('click', async (e) => {
+document.addEventListener('click', (e) => {
   if (!e.target.classList.contains('edit-task-btn')) return;
   const id = e.target.dataset.id;
-  const r = await fetch(`${BASE}/api/get_tasks.php`);
-  const j = await r.json();
-  if (!j.success) { alert('Failed to load task data.'); return; }
-  const t = j.tasks.find(x => x.id == id);
-  if (!t) { alert('Task not found.'); return; }
+  const t = lastTasks.find(x => x.id == id);
+  if (!t) { toast('Task not found — refreshing list.', true); loadTasks(); return; }
 
   const m = document.getElementById('editTaskModal');
   const f = document.getElementById('edit-task-form');
@@ -508,7 +527,7 @@ if (editForm) {
   editForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const j = await formPost(`${BASE}/api/edit_task.php`, editForm);
-    alert(j.message || j.error || 'Update complete.');
+    toast(j.message || j.error || 'Update complete.', !j.success);
     document.getElementById('editTaskModal').classList.add('hidden');
     loadTasks();
   });
@@ -518,9 +537,9 @@ document.querySelector('.close-edit').onclick = () => document.getElementById('e
 async function openModal(team, task) {
   const r = await fetch(`${BASE}/api/get_submission.php?team=${encodeURIComponent(team)}&task=${task}`);
   const j = await r.json();
-  if (!j.success) { alert(j.error || 'Load failed'); return; }
+  if (!j.success) { toast(j.error || 'Load failed', true); return; }
   current = { team, task };
-  modalTitle.textContent = `${team} – ${j.task.title} (${j.task.points} pts)`;
+  modalTitle.textContent = `${team.replace(/_/g, ' ')} – ${j.task.title} (${j.task.points} pts)`;
   modalMedia.innerHTML = '';
 
   j.files.forEach((f, idx) => {
@@ -563,6 +582,27 @@ async function openModal(team, task) {
       });
       tile.appendChild(placeholder);
     }
+
+    // Per-file slideshow flag — curates the end-of-event slideshow set.
+    const showBtn = document.createElement('button');
+    showBtn.type = 'button';
+    showBtn.className = 'slideshow-toggle' + (f.slideshow ? ' on' : '');
+    showBtn.textContent = f.slideshow ? '★ In slideshow' : '☆ Slideshow';
+    showBtn.addEventListener('click', async () => {
+      showBtn.disabled = true;
+      const j2 = await jsonPost(`${BASE}/api/toggle_slideshow.php`, {
+        file_id: f.id, on: !showBtn.classList.contains('on'),
+      });
+      showBtn.disabled = false;
+      if (!j2.success) { toast(j2.message || 'Failed to update slideshow flag', true); return; }
+      showBtn.classList.toggle('on', j2.slideshow);
+      showBtn.textContent = j2.slideshow ? '★ In slideshow' : '☆ Slideshow';
+    });
+    const btnWrap = document.createElement('div');
+    btnWrap.style.cssText = 'text-align:center; margin-top:4px;';
+    btnWrap.appendChild(showBtn);
+    tile.appendChild(btnWrap);
+
     modalMedia.appendChild(tile);
   });
 
@@ -574,7 +614,7 @@ async function openModal(team, task) {
 document.getElementById('approve-btn').onclick = async () => {
   if (!current) return;
   const j = await jsonPost(`${BASE}/api/approve.php`, current);
-  alert(j.message || 'Approved');
+  toast(j.message || 'Approved', !j.success);
   modal.classList.add('hidden');
   loadQueue(); loadTeams(); loadTasks();
 };
@@ -586,7 +626,7 @@ document.getElementById('reject-send').onclick = async () => {
   if (!current) return;
   const note = rejectNote.value.trim();
   const j = await jsonPost(`${BASE}/api/reject.php`, { ...current, note });
-  alert(j.message || 'Rejected');
+  toast(j.message || 'Rejected', !j.success);
   modal.classList.add('hidden');
   loadQueue(); loadTeams(); loadTasks();
 };
@@ -596,8 +636,8 @@ if (addTaskForm) {
   addTaskForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const j = await formPost(`${BASE}/api/add_task.php`, addTaskForm);
-    if (j.success) { alert(j.message || 'Task added!'); addTaskForm.reset(); loadTasks(); }
-    else           { alert(j.error || 'Failed to add task.'); }
+    if (j.success) { toast(j.message || 'Task added!'); addTaskForm.reset(); loadTasks(); }
+    else           { toast(j.error || 'Failed to add task.', true); }
   });
 }
 

@@ -25,8 +25,13 @@ function require_admin(): void {
     }
 }
 
+// Slug charset is locked to [a-z0-9_]: the slug is used as a directory name
+// under DATA_DIR/uploads/ and the admin APIs filter the team parameter with
+// the same character class, so anything looser (dots, slashes, dashes) would
+// create teams the admin tools can't address.
 function normalize_team_name(string $raw): string {
-    return strtolower(str_replace(' ', '_', trim($raw)));
+    $s = strtolower(str_replace(' ', '_', trim($raw)));
+    return preg_replace('/[^a-z0-9_]/', '', $s);
 }
 
 // The login_attempts table is created by migrate.php. On a fresh DB it may not

@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS submission_files (
   mime_type     VARCHAR(100) NOT NULL,
   byte_size     BIGINT UNSIGNED NOT NULL,
   has_thumb     TINYINT(1) NOT NULL DEFAULT 0,
+  -- Admin-curated "use in end-of-event slideshow" flag.
+  slideshow     TINYINT(1) NOT NULL DEFAULT 0,
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_sub (submission_id),
