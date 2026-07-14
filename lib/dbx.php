@@ -66,7 +66,7 @@ function set_setting(string $k, ?string $v): void {
 }
 
 /** Slugs of themes the user can pick. The CSS keys off these. */
-const THEMES = ['quest', 'sunset', 'ocean', 'meadow', 'light', 'dark'];
+const THEMES = ['quest', 'sunset', 'ocean', 'meadow', 'carnival', 'light', 'dark'];
 const DEFAULT_THEME = 'quest';
 
 /** Returns the active theme slug.

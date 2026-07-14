@@ -12,6 +12,7 @@ $theme_meta = [
     'sunset' => ['label' => 'Sunset', 'desc' => 'Warm orange → red → gold gradient'],
     'ocean'  => ['label' => 'Ocean',  'desc' => 'Cool deep blue → cyan gradient'],
     'meadow' => ['label' => 'Meadow', 'desc' => 'Forest green → fresh green gradient'],
+    'carnival' => ['label' => 'Carnival', 'desc' => 'Bright, playful pink → gold → aqua → violet'],
     'light'  => ['label' => 'Light',  'desc' => 'Clean light background, no animation'],
     'dark'   => ['label' => 'Dark',   'desc' => 'Dark mode for low-light review'],
 ];
