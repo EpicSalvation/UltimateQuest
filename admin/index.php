@@ -1,9 +1,13 @@
 <?php
 require_once __DIR__ . '/../lib/auth.php';
+$err = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (try_admin_login($_POST['password'] ?? '')) {
         header('Location: ' . BASE_URL . '/admin/dashboard.php'); exit;
     }
+    $err = login_is_locked('__admin_' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'))
+        ? 'Too many failed attempts — wait a minute, then try again.'
+        : 'Incorrect password.';
 }
 ?>
 <!doctype html>
@@ -17,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="container">
   <form action="<?=BASE_URL?>/admin/index.php" method="post" class="card">
     <h2>Admin Login</h2>
+    <?php if ($err): ?><div class="alert error"><?=htmlspecialchars($err)?></div><?php endif; ?>
     <label>Password <input type="password" name="password" required></label>
     <button type="submit">Enter</button>
   </form>

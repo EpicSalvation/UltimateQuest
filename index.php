@@ -8,7 +8,7 @@ if (current_team()) { header('Location: ' . BASE_URL . '/team.php'); exit; }
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="<?=BASE_URL?>/style.css?v=<?=@filemtime(__DIR__.'/style.css')?>">
-<title>Youth The Ultimate Quest</title>
+<title>The Ultimate Quest</title>
 </head>
 <body class="container">
   <div class="logo-wrapper">
@@ -22,8 +22,13 @@ if (current_team()) { header('Location: ' . BASE_URL . '/team.php'); exit; }
 
   <form method="post" action="<?=BASE_URL?>/login.php" class="card">
     <h2>Team Login</h2>
-    <label>Team Name <input name="team" required></label>
-    <label>PIN <input name="pin" required></label>
+    <?php if (($_GET['err'] ?? '') === 'locked'): ?>
+      <div class="alert error">Too many failed attempts — wait a minute, then try again.</div>
+    <?php elseif (!empty($_GET['err'])): ?>
+      <div class="alert error">Login failed. Check your team name and PIN, then try again.</div>
+    <?php endif; ?>
+    <label>Team Name <input name="team" required autocomplete="off" autocapitalize="none"></label>
+    <label>PIN <input name="pin" required inputmode="numeric" autocomplete="off"></label>
     <button type="submit">Enter</button>
   </form>
 

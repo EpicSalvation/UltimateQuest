@@ -27,7 +27,7 @@ if (!$row) {
 }
 
 $fst = db()->prepare(
-    'SELECT filename, mime_type, has_thumb FROM submission_files WHERE submission_id = ? ORDER BY id'
+    'SELECT id, filename, mime_type, has_thumb, slideshow FROM submission_files WHERE submission_id = ? ORDER BY id'
 );
 $fst->execute([$row['submission_id']]);
 $file_rows = $fst->fetchAll();
@@ -39,11 +39,13 @@ $files = [];
 foreach ($file_rows as $f) {
     $thumb_name = pathinfo($f['filename'], PATHINFO_FILENAME) . '.jpg';
     $files[] = [
+        'id'        => (int)$f['id'],
         'name'      => $f['filename'],
         'url'       => $base_full . rawurlencode($f['filename']),
         'thumb_url' => $f['has_thumb'] ? $base_thumb . rawurlencode($thumb_name) : null,
         'has_thumb' => (bool)$f['has_thumb'],
         'type'      => $f['mime_type'],
+        'slideshow' => (bool)$f['slideshow'],
     ];
 }
 

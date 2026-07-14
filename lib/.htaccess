@@ -1,0 +1,3 @@
+# lib/ contains bootstrap code and the schema — nothing here should ever be
+# fetched directly over HTTP.
+Require all denied

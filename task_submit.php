@@ -24,12 +24,6 @@ $num_photos = (int)$task['photos_required'];
 $num_videos = (int)$task['videos_required'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
-    @file_put_contents(
-        DATA_DIR . '/upload_debug.log',
-        date('H:i:s') . ' ' . ($_SERVER['CONTENT_LENGTH'] ?? '?') . " bytes\n",
-        FILE_APPEND
-    );
-
     // Guard the host's hard POST cap. A body over the limit is silently
     // discarded by PHP before this script runs — $_POST and $_FILES arrive
     // empty even though the browser sent the bytes. Detect both the "too
@@ -84,7 +78,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
             $upload_errors[] = "$name (type $type not allowed)"; continue;
         }
 
-        $ext   = pathinfo($name, PATHINFO_EXTENSION);
+        // The stored name is built here, not from user input — only the
+        // extension survives, and only after being reduced to a safe charset.
+        $ext = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', pathinfo($name, PATHINFO_EXTENSION)));
+        $ext = substr($ext !== '' ? $ext : 'bin', 0, 10);
         $fname = 'file' . ($i + 1) . '_' . time() . '.' . $ext;
         $dest  = "$upload_dir/$fname";
         if (!move_uploaded_file($tmp, $dest)) {

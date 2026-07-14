@@ -348,6 +348,75 @@ textarea.auto-expand {
     line-height: 1.4;
 }
 
+/* --- Toast notifications (admin dashboard) -------------------------------- */
+
+.toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translate(-50%, 20px);
+    background: var(--accent);
+    color: var(--accent-text);
+    padding: 10px 18px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    font-weight: 600;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    max-width: 90vw;
+}
+
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.toast-error { background: #a02020; color: #fff; }
+
+/* --- Slideshow curation ---------------------------------------------------- */
+
+button.slideshow-toggle {
+    width: auto;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--card-border);
+    color: inherit;
+    font-weight: 600;
+}
+
+button.slideshow-toggle.on {
+    background: #c98a00;
+    border-color: #c98a00;
+    color: #fff;
+}
+
+.slideshow-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: var(--gap);
+}
+
+.slideshow-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: center;
+}
+
+.slideshow-tile img {
+    width: 100%;
+    height: 130px;
+    object-fit: cover;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.slideshow-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 130px;
+    border: 1px dashed var(--card-border);
+    border-radius: 8px;
+}
+
 /* --- Theme picker (admin/settings.php) ----------------------------------- */
 
 .theme-grid {

@@ -38,6 +38,14 @@ function ensure_schema_upgrades(PDO $pdo): void {
             }
             $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','3') ON DUPLICATE KEY UPDATE v=VALUES(v)");
         }
+        if ($v < 4) {
+            // Per-file "use in end-of-event slideshow" flag, set by admins during review.
+            $col = $pdo->query("SHOW COLUMNS FROM submission_files LIKE 'slideshow'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE submission_files ADD COLUMN slideshow TINYINT(1) NOT NULL DEFAULT 0 AFTER has_thumb");
+            }
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','4') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
     } catch (Throwable $e) {
         // Non-fatal: app continues; admin can re-run migrate.php if needed.
     }
