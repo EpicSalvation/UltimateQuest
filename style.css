@@ -2,8 +2,8 @@
  *
  * Theming: html[data-theme="..."] sets the palette via CSS custom properties.
  * Default ("quest") matches the original animated purple→pink→blue gradient.
- * Other themes (sunset, ocean, meadow, light, dark) override the variables
- * below. Pick one in admin/settings.php.
+ * Other themes (sunset, ocean, meadow, carnival, light, dark) override the
+ * variables below. Pick one in admin/settings.php.
  */
 
 :root {
@@ -30,6 +30,13 @@
     --modal-content-text: #222;
     --scrim: rgba(0, 0, 0, 0.6);
 
+    /* Text/links that sit directly on the page background (outside any card).
+       The saturated gradients wash out --text/--link, so on-background copy and
+       headings use these high-contrast values instead. Default (quest) is a
+       dark gradient, so light text with a dark halo reads on every stop. */
+    --on-bg-text: #fff;
+    --on-bg-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 4px rgba(0, 0, 0, 0.35);
+
     color-scheme: light;
 }
 
@@ -39,18 +46,41 @@ html[data-theme="sunset"] {
     --bg: linear-gradient(135deg, #FF6E40, #FF1744, #FFB700);
     --heading: #7a1f08;
     --progress-bar: linear-gradient(90deg, #FFB700, #FF1744);
+    /* Warm gradient runs bright (gold) → mid (red); dark text with a light
+       halo stays readable across all three stops. */
+    --on-bg-text: #4a1000;
+    --on-bg-shadow: 0 1px 2px rgba(255, 255, 255, 0.7), 0 0 4px rgba(255, 255, 255, 0.4);
 }
 
 html[data-theme="ocean"] {
     --bg: linear-gradient(135deg, #001F3F, #0077B6, #00B4D8);
     --heading: #002a4d;
     --progress-bar: linear-gradient(90deg, #00B4D8, #001F3F);
+    --on-bg-text: #eaf7ff;
+    --on-bg-shadow: 0 1px 2px rgba(0, 0, 0, 0.65), 0 0 4px rgba(0, 0, 0, 0.4);
 }
 
 html[data-theme="meadow"] {
     --bg: linear-gradient(135deg, #264E36, #4F9D52, #A0D468);
     --heading: #1a4f2a;
     --progress-bar: linear-gradient(90deg, #A0D468, #264E36);
+    --on-bg-text: #f2fbe9;
+    --on-bg-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 4px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="carnival"] {
+    --bg: linear-gradient(135deg, #FF5FA2, #FFC93C, #4FE0D0, #9D7BFF);
+    --heading: #b0158a;
+    --heading-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
+    --accent: #00b3a4;
+    --accent-text: #fff;
+    --secondary: #7c4dff;
+    --link: #c2185b;
+    --progress-bar: linear-gradient(90deg, #FF5FA2, #FFC93C, #4FE0D0);
+    /* Bright multi-hue gradient: dark violet text with a light halo reads on
+       the pink, gold and aqua stops alike. */
+    --on-bg-text: #3a0f52;
+    --on-bg-shadow: 0 1px 2px rgba(255, 255, 255, 0.75), 0 0 5px rgba(255, 255, 255, 0.45);
 }
 
 html[data-theme="light"] {
@@ -63,6 +93,9 @@ html[data-theme="light"] {
     --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     --progress-track: rgba(0, 0, 0, 0.08);
     --progress-bar: linear-gradient(90deg, #0a6, #2a2f5f);
+    /* Light page background → dark on-background text, no halo needed. */
+    --on-bg-text: #2a2f5f;
+    --on-bg-shadow: none;
 }
 
 html[data-theme="dark"] {
@@ -84,6 +117,8 @@ html[data-theme="dark"] {
     --modal-content-bg: #20212e;
     --modal-content-text: #e7e7ee;
     --scrim: rgba(0, 0, 0, 0.75);
+    --on-bg-text: #e7e7ee;
+    --on-bg-shadow: none;
 }
 
 /* --- Base layout --------------------------------------------------------- */
@@ -200,6 +235,39 @@ a {
     color: var(--link);
     font-weight: 600;
     text-decoration: none;
+}
+
+/* --- On-background text (outside cards) ---------------------------------- *
+ * Headings, paragraphs and links placed directly on <body> sit on the raw
+ * theme gradient, where --text/--link/--heading can wash out. Direct children
+ * of body get the high-contrast --on-bg-* treatment; content inside .card is
+ * unaffected because it is nested deeper. */
+
+body > h1,
+body > h2,
+body > p {
+    color: var(--on-bg-text);
+    text-shadow: var(--on-bg-shadow);
+}
+
+/* Navigation/action links on the background (Admin, Log Out, Back, Dashboard…)
+ * become card-matching pills, so their contrast equals in-card links on every
+ * theme rather than depending on --link vs. the gradient. */
+body > p a {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    box-shadow: var(--card-shadow);
+    color: var(--link);
+    text-shadow: none;
+    line-height: 1.4;
+}
+
+body > p a:hover {
+    filter: brightness(1.05);
+    text-decoration: underline;
 }
 
 .alert {
@@ -450,5 +518,6 @@ button.slideshow-toggle.on {
 .theme-swatch[data-preview="sunset"] { background: linear-gradient(135deg, #FF6E40, #FF1744, #FFB700); }
 .theme-swatch[data-preview="ocean"]  { background: linear-gradient(135deg, #001F3F, #0077B6, #00B4D8); }
 .theme-swatch[data-preview="meadow"] { background: linear-gradient(135deg, #264E36, #4F9D52, #A0D468); }
+.theme-swatch[data-preview="carnival"] { background: linear-gradient(135deg, #FF5FA2, #FFC93C, #4FE0D0, #9D7BFF); }
 .theme-swatch[data-preview="light"]  { background: #f4f5fa; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
 .theme-swatch[data-preview="dark"]   { background: #16161e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
