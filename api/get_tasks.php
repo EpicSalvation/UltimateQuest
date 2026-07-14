@@ -4,7 +4,7 @@ require_admin();
 header('Content-Type: application/json');
 
 $rows = db()->query(
-    'SELECT id, title, description, points,
+    'SELECT id, title, description, points, penalty,
             photos_required AS photos, videos_required AS videos,
             mandatory
        FROM tasks
@@ -14,6 +14,7 @@ $rows = db()->query(
 foreach ($rows as &$r) {
     $r['id']        = (int)$r['id'];
     $r['points']    = (int)$r['points'];
+    $r['penalty']   = (int)$r['penalty'];
     $r['photos']    = (int)$r['photos'];
     $r['videos']    = (int)$r['videos'];
     $r['mandatory'] = (int)$r['mandatory'];

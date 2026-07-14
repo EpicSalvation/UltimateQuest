@@ -81,7 +81,7 @@ if ($end && $now > $end) {
 
 // Tasks LEFT JOIN this team's submissions; one row per task with status/note (or 'not_started').
 $st = db()->prepare(
-    "SELECT tk.id, tk.title, tk.points, tk.mandatory,
+    "SELECT tk.id, tk.title, tk.points, tk.penalty, tk.mandatory,
             COALESCE(s.status, 'not_started') AS status,
             s.note
        FROM tasks tk
@@ -93,6 +93,7 @@ $task_list = $st->fetchAll();
 foreach ($task_list as &$t) {
     $t['id']        = (int)$t['id'];
     $t['points']    = (int)$t['points'];
+    $t['penalty']   = (int)$t['penalty'];
     $t['mandatory'] = (int)$t['mandatory'];
 }
 unset($t);
@@ -105,11 +106,13 @@ usort($task_list, function ($a, $b) {
     return $b['points'] <=> $a['points'];
 });
 
-// Derived scores for this team.
+// Derived scores for this team. Every task's penalty counts against the team
+// until that task is approved (penalties are stored positive and subtracted).
 $ss = db()->prepare(
     "SELECT
-        COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS awarded,
-        COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END), 0) AS pending
+        COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points  ELSE 0 END), 0) AS awarded,
+        COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points  ELSE 0 END), 0) AS pending,
+        COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.penalty ELSE 0 END), 0) AS penalty_cleared
        FROM submissions s JOIN tasks tk ON tk.id = s.task_id
       WHERE s.team_id = ?"
 );
@@ -117,7 +120,11 @@ $ss->execute([$team_id]);
 $score = $ss->fetch();
 $awarded = (int)$score['awarded'];
 $pending = (int)$score['pending'];
-$total   = $awarded + $pending;
+
+$total_penalty       = (int)db()->query('SELECT COALESCE(SUM(penalty), 0) FROM tasks')->fetchColumn();
+$penalty_outstanding = $total_penalty - (int)$score['penalty_cleared'];
+$net   = $awarded - $penalty_outstanding;
+$total = $net + $pending;
 
 $total_tasks    = count($task_list);
 $approved_count = count(array_filter($task_list, fn($t) => $t['status'] === 'approved'));
@@ -125,12 +132,10 @@ $pending_count  = count(array_filter($task_list, fn($t) => $t['status'] === 'pen
 $rejected_count = count(array_filter($task_list, fn($t) => $t['status'] === 'rejected'));
 $progress_pct   = $total_tasks > 0 ? round(($approved_count / $total_tasks) * 100) : 0;
 
-$mandatory_total     = count(array_filter($task_list, fn($t) => $t['mandatory']));
-$mandatory_completed = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'approved'));
-$mandatory_pending   = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'pending'));
-$mandatory_min       = (int)(setting('mandatory_min_required') ?? 0);
-if ($mandatory_min > $mandatory_total) $mandatory_min = $mandatory_total;
-$qualifies           = $mandatory_completed >= $mandatory_min;
+$priority_total     = count(array_filter($task_list, fn($t) => $t['mandatory']));
+$priority_completed = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'approved'));
+$priority_pending   = count(array_filter($task_list, fn($t) => $t['mandatory'] && $t['status'] === 'pending'));
+$priority_done      = $priority_completed >= $priority_total;
 
 $help_phones = [];
 foreach ([['help_phone', 'help_phone_name'], ['help_phone2', 'help_phone2_name']] as [$hp_key, $name_key]) {
@@ -188,29 +193,32 @@ function format_phone_display(string $raw): string {
     📋 <strong><?=$total_tasks?></strong> Total
   </p>
   <p><strong>Score:</strong> <?=$awarded?> pts awarded<br>
+  <?php if ($total_penalty > 0): ?>
+  <strong>Penalties:</strong> −<?=$penalty_outstanding?> pts for incomplete tasks<br>
+  <?php endif; ?>
   <strong>Pending:</strong> <?=$pending?> pts<br>
   <strong>Total:</strong> <?=$total?> pts</p>
-<?php if ($mandatory_total > 0): ?>
+<?php if ($priority_total > 0): ?>
   <?php
-    $mand_pct = $mandatory_min > 0
-        ? min(100, round(($mandatory_completed / $mandatory_min) * 100))
-        : 100;
+    $prio_pct = min(100, round(($priority_completed / $priority_total) * 100));
   ?>
   <div class="mandatory-status" style="margin-top:12px; padding:10px; border-radius:8px; border:1px solid rgba(0,0,0,0.15); background:rgba(255,255,255,0.08);">
-    <p style="margin:0 0 6px; font-weight:600;">⭐ Mandatory Tasks</p>
+    <p style="margin:0 0 6px; font-weight:600;">⭐ Priority Tasks</p>
     <div class="progress-wrapper" style="margin:4px 0;">
-      <div class="progress-bar" style="width: <?=$mand_pct?>%; background:<?=$qualifies?'#2e7d32':'#c98a00'?>;"></div>
+      <div class="progress-bar" style="width: <?=$prio_pct?>%; background:<?=$priority_done?'#2e7d32':'#c98a00'?>;"></div>
     </div>
     <p style="margin:6px 0 0;">
-      <strong><?=$mandatory_completed?></strong> of <strong><?=$mandatory_min?></strong> required completed
+      <strong><?=$priority_completed?></strong> of <strong><?=$priority_total?></strong> priority tasks completed
+      <?php if ($priority_pending > 0): ?>
       &nbsp;·&nbsp;
-      <span class="small"><?=$mandatory_total?> mandatory total<?php if ($mandatory_pending > 0): ?>, <?=$mandatory_pending?> pending<?php endif; ?></span>
+      <span class="small"><?=$priority_pending?> pending</span>
+      <?php endif; ?>
     </p>
-    <p style="margin:6px 0 0; font-weight:600; color:<?=$qualifies?'#2e7d32':'#c98a00'?>;">
-      <?php if ($qualifies): ?>
-        ✅ Your team qualifies!
+    <p style="margin:6px 0 0; font-weight:600; color:<?=$priority_done?'#2e7d32':'#c98a00'?>;">
+      <?php if ($priority_done): ?>
+        ✅ All priority tasks complete!
       <?php else: ?>
-        ⚠️ <?=($mandatory_min - $mandatory_completed)?> more mandatory task<?=($mandatory_min - $mandatory_completed)===1?'':'s'?> needed to qualify
+        ⚠️ Skipping a priority task costs your team a steep point penalty — finish them first!
       <?php endif; ?>
     </p>
   </div>
@@ -244,8 +252,9 @@ function format_phone_display(string $raw): string {
 
 <div class="card">
   <h2>Available Tasks</h2>
+  <?php $show_penalty_col = $total_penalty > 0; $col_count = $show_penalty_col ? 6 : 5; ?>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><th class="center">ID</th><th style="text-align:left;">Task</th><th class="center">Points</th><th class="center">Status</th><th></th></tr>
+    <tr><th class="center">ID</th><th style="text-align:left;">Task</th><th class="center">Points</th><?php if ($show_penalty_col): ?><th class="center">Penalty if skipped</th><?php endif; ?><th class="center">Status</th><th></th></tr>
     <?php foreach ($task_list as $t): ?>
       <?php
         $color = match($t['status']) {
@@ -260,21 +269,24 @@ function format_phone_display(string $raw): string {
         <td class="center"><?=$t['id']?></td>
         <td>
           <?php if ($t['mandatory']): ?>
-            <span title="Mandatory task" style="color:#c98a00;">⭐</span>
+            <span title="Priority task" style="color:#c98a00;">⭐</span>
           <?php endif; ?>
           <strong<?= $t['mandatory'] ? ' style="border-bottom:2px solid #c98a00;"' : '' ?>><?=htmlspecialchars($t['title'])?></strong>
           <?php if ($t['mandatory']): ?>
-            <span class="small" style="color:#c98a00; font-weight:600;">(Mandatory)</span>
+            <span class="small" style="color:#c98a00; font-weight:600;">(Priority)</span>
           <?php endif; ?>
         </td>
         <td class="center"><?=$t['points']?></td>
+        <?php if ($show_penalty_col): ?>
+          <td class="center" style="color:#c00; font-weight:600;"><?= $t['penalty'] > 0 ? '−' . $t['penalty'] : '' ?></td>
+        <?php endif; ?>
         <td class="center" style="color:<?=$color?>;font-weight:600;"><?=$label?></td>
         <td class="center">
           <a href="<?=BASE_URL?>/task_submit.php?id=<?=$t['id']?>">Open</a>
         </td>
       </tr>
       <?php if ($t['status'] === 'rejected' && $t['note']): ?>
-        <tr><td colspan="5" class="small" style="color:#c00;">Note: <?=htmlspecialchars($t['note'])?></td></tr>
+        <tr><td colspan="<?=$col_count?>" class="small" style="color:#c00;">Note: <?=htmlspecialchars($t['note'])?></td></tr>
       <?php endif; ?>
     <?php endforeach; ?>
   </table>

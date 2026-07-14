@@ -19,8 +19,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   title           VARCHAR(255) NOT NULL,
   description     TEXT NULL,
   points          INT UNSIGNED NOT NULL DEFAULT 0,
+  -- Points deducted at tally time when the task is NOT approved. Always
+  -- stored as a positive number; the scoring queries subtract it.
+  penalty         INT UNSIGNED NOT NULL DEFAULT 0,
   photos_required TINYINT UNSIGNED NOT NULL DEFAULT 0,
   videos_required TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  -- "Priority" flag in the UI (kept as `mandatory` for upgrade compatibility).
   mandatory       TINYINT(1) NOT NULL DEFAULT 0,
   sort_order      INT NOT NULL DEFAULT 0,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
