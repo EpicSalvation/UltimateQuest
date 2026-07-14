@@ -123,8 +123,6 @@ $pending = (int)$score['pending'];
 
 $total_penalty       = (int)db()->query('SELECT COALESCE(SUM(penalty), 0) FROM tasks')->fetchColumn();
 $penalty_outstanding = $total_penalty - (int)$score['penalty_cleared'];
-$net   = $awarded - $penalty_outstanding;
-$total = $net + $pending;
 
 $total_tasks    = count($task_list);
 $approved_count = count(array_filter($task_list, fn($t) => $t['status'] === 'approved'));
@@ -192,12 +190,14 @@ function format_phone_display(string $raw): string {
     ❌ <strong><?=$rejected_count?></strong> Rejected &nbsp;&nbsp;
     📋 <strong><?=$total_tasks?></strong> Total
   </p>
-  <p><strong>Score:</strong> <?=$awarded?> pts awarded<br>
+  <p><strong>Score:</strong> <?=$awarded?> pts<?php if ($total_penalty > 0): ?>
+    <span style="color:#c00; font-weight:600;">(−<?=$penalty_outstanding?>)</span>
+  <?php endif; ?><br>
+  <strong>Pending:</strong> <?=$pending?> pts</p>
   <?php if ($total_penalty > 0): ?>
-  <strong>Penalties:</strong> −<?=$penalty_outstanding?> pts for incomplete tasks<br>
+  <p class="small" style="margin:4px 0 0;">⚠️ Some tasks have negative points if they are not completed —
+    the amount in parentheses is being subtracted from your score until those tasks are done.</p>
   <?php endif; ?>
-  <strong>Pending:</strong> <?=$pending?> pts<br>
-  <strong>Total:</strong> <?=$total?> pts</p>
 <?php if ($priority_total > 0): ?>
   <?php
     $prio_pct = min(100, round(($priority_completed / $priority_total) * 100));
