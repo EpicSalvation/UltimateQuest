@@ -36,9 +36,13 @@ $pdo = db();
 
 // ---- Pull data for results + game_data dumps. ----------------------------
 
+// score is the net result: approved points minus the penalty of every task the
+// team did not complete (SUM(approved: points + penalty) - SUM(all penalties)).
 $leaderboard = $pdo->query(
     "SELECT t.id, t.name, t.display_name,
-            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS score,
+            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
+              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks) AS score,
+            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS points_awarded,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN 1 ELSE 0 END), 0) AS approved,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN 1 ELSE 0 END), 0) AS pending,
             COALESCE(SUM(CASE WHEN s.status='rejected' THEN 1 ELSE 0 END), 0) AS rejected
@@ -50,13 +54,13 @@ $leaderboard = $pdo->query(
 )->fetchAll();
 
 $per_task = $pdo->query(
-    "SELECT tk.id, tk.title, tk.points,
+    "SELECT tk.id, tk.title, tk.points, tk.penalty,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN 1 ELSE 0 END), 0) AS approved,
             COALESCE(SUM(CASE WHEN s.status='rejected' THEN 1 ELSE 0 END), 0) AS rejected,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN 1 ELSE 0 END), 0) AS pending
        FROM tasks tk
        LEFT JOIN submissions s ON s.task_id = tk.id
-       GROUP BY tk.id, tk.title, tk.points
+       GROUP BY tk.id, tk.title, tk.points, tk.penalty
        ORDER BY tk.sort_order, tk.id"
 )->fetchAll();
 
@@ -71,7 +75,7 @@ $file_stats = $pdo->query(
 )->fetch();
 
 $teams_dump          = $pdo->query("SELECT id, name, display_name, created_at FROM teams ORDER BY id")->fetchAll();
-$tasks_dump          = $pdo->query("SELECT id, title, description, points, photos_required, videos_required, mandatory, sort_order, created_at FROM tasks ORDER BY sort_order, id")->fetchAll();
+$tasks_dump          = $pdo->query("SELECT id, title, description, points, penalty, photos_required, videos_required, mandatory, sort_order, created_at FROM tasks ORDER BY sort_order, id")->fetchAll();
 $submissions_dump    = $pdo->query("SELECT id, team_id, task_id, status, note, submitted_at, reviewed_at FROM submissions ORDER BY id")->fetchAll();
 $submission_files_dp = $pdo->query("SELECT id, submission_id, filename, mime_type, byte_size, has_thumb, created_at FROM submission_files ORDER BY id")->fetchAll();
 $settings_dump       = $pdo->query("SELECT k, v FROM settings WHERE k <> 'admin_password_hash' ORDER BY k")->fetchAll();
@@ -135,9 +139,10 @@ foreach ($leaderboard as $i => $r) {
     $html .= '<tr><td>' . ($i + 1) . '</td><td>' . htmlspecialchars($r['display_name'] ?: $r['name'])
           . '</td><td>' . (int)$r['score'] . '</td><td>' . (int)$r['approved'] . '</td><td>' . (int)$r['rejected'] . '</td></tr>';
 }
-$html .= "</table><h2>Per-task</h2><table><tr><th>Task</th><th>Points</th><th>Approved</th><th>Rejected</th></tr>";
+$html .= "</table><h2>Per-task</h2><table><tr><th>Task</th><th>Points</th><th>Penalty</th><th>Approved</th><th>Rejected</th></tr>";
 foreach ($per_task as $r) {
     $html .= '<tr><td>' . htmlspecialchars($r['title']) . '</td><td>' . (int)$r['points']
+          . '</td><td>' . ((int)$r['penalty'] > 0 ? '-' . (int)$r['penalty'] : '')
           . '</td><td>' . (int)$r['approved'] . '</td><td>' . (int)$r['rejected'] . '</td></tr>';
 }
 $html .= "</table></body></html>";

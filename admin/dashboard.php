@@ -21,7 +21,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
     $start  = $_POST['start_time'] ?? '';
     $end    = $_POST['end_time']   ?? '';
     $reveal = isset($_POST['reveal_leaderboard']);
-    $min_mandatory = max(0, intval($_POST['mandatory_min_required'] ?? 0));
     $help_phone    = trim((string)($_POST['help_phone'] ?? ''));
     $help_phone    = trim(preg_replace('/[^0-9+()\-.\s]/', '', $help_phone));
     $help_phone2   = trim((string)($_POST['help_phone2'] ?? ''));
@@ -36,7 +35,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
         set_setting('event_start_time',         $start_dt->format('Y-m-d H:i:s'));
         set_setting('event_end_time',           $end_dt->format('Y-m-d H:i:s'));
         set_setting('reveal_leaderboard',       $reveal ? '1' : '0');
-        set_setting('mandatory_min_required',   (string)$min_mandatory);
         set_setting('help_phone',               $help_phone);
         set_setting('help_phone2',              $help_phone2);
         set_setting('help_phone_name',          $help_phone_name);
@@ -75,7 +73,6 @@ $end_val   = '';
 $start_str = setting('event_start_time');
 $end_str   = setting('event_end_time');
 $reveal    = setting('reveal_leaderboard') === '1';
-$min_mandatory_val = (int)(setting('mandatory_min_required') ?? 0);
 $help_phone_val        = (string)(setting('help_phone') ?? '');
 $help_phone2_val       = (string)(setting('help_phone2') ?? '');
 $help_phone_name_val   = (string)(setting('help_phone_name') ?? '');
@@ -160,9 +157,6 @@ if ($end_str) {
       <span>Reveal Leaderboard</span>
       <input type="checkbox" name="reveal_leaderboard" <?=$reveal?'checked':''?> style="margin:0;">
     </label>
-    <label>Mandatory tasks required to qualify:
-      <input type="number" name="mandatory_min_required" min="0" value="<?=$min_mandatory_val?>">
-    </label>
     <label>Help contact 1 name (Optional &mdash; shown to teams):
       <input type="text" name="help_phone_name" value="<?=htmlspecialchars($help_phone_name_val)?>" placeholder="Game host name">
     </label>
@@ -181,6 +175,7 @@ if ($end_str) {
 
 <div class="card" id="tasks-card">
   <h2>Tasks</h2>
+  <p class="center small"><a href="<?=BASE_URL?>/admin/import_tasks.php">📥 Bulk import tasks from CSV</a></p>
   <div id="tasks-table">Loading tasks…</div>
   <hr>
   <h3 style="margin-top: 1em; text-align:center;">Add New Task</h3>
@@ -189,13 +184,14 @@ if ($end_str) {
     <input type="hidden" name="add_task" value="1">
     <label>Title: <input type="text" name="title" required></label>
     <label>Points: <input type="number" name="points" min="0" required></label>
+    <label>Penalty if skipped: <input type="number" name="penalty" min="0" value="0"></label>
     <label># Photos: <input type="number" name="photos" min="0" required></label>
     <label># Videos: <input type="number" name="videos" min="0" required></label>
     <label>Description:
       <textarea name="description" rows="1" class="auto-expand" placeholder="Enter task description…"></textarea>
     </label>
     <label style="display:flex; align-items:center; gap:8px;">
-      <input type="checkbox" name="mandatory" value="1"> Mandatory ⭐
+      <input type="checkbox" name="mandatory" value="1"> Priority ⭐
     </label>
     <button type="submit">Add</button>
   </form>
@@ -271,13 +267,14 @@ if ($end_str) {
       <input type="hidden" name="task_id">
       <label>Title: <input type="text" name="title" required></label>
       <label>Points: <input type="number" name="points" min="0" required></label>
+      <label>Penalty if skipped: <input type="number" name="penalty" min="0" value="0"></label>
       <label># Photos: <input type="number" name="photos" min="0" required></label>
       <label># Videos: <input type="number" name="videos" min="0" required></label>
       <label>Description:
         <textarea name="description" rows="2" class="auto-expand"></textarea>
       </label>
       <label style="display:flex; align-items:center; gap:8px;">
-        <input type="checkbox" name="mandatory" value="1"> Mandatory ⭐
+        <input type="checkbox" name="mandatory" value="1"> Priority ⭐
       </label>
       <div class="center">
         <button type="submit">Save Changes</button>
@@ -412,8 +409,10 @@ async function loadTeams() {
   let html = '<table style="width:100%; border-collapse:collapse;">' +
              '<tr>' +
              '<th style="text-align:left; padding:6px;">Team Name</th>' +
-             '<th style="text-align:center; padding:6px;">Score Awarded</th>' +
-             '<th style="text-align:center; padding:6px;">Score Pending</th>' +
+             '<th style="text-align:center; padding:6px;">Awarded</th>' +
+             '<th style="text-align:center; padding:6px;">Pending</th>' +
+             '<th style="text-align:center; padding:6px;">Penalties</th>' +
+             '<th style="text-align:center; padding:6px;">Net Score</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
   for (const team of j.teams) {
@@ -421,6 +420,8 @@ async function loadTeams() {
       <td style="padding:6px;">${team.name}</td>
       <td style="padding:6px; text-align:center;">${team.score_awarded}</td>
       <td style="padding:6px; text-align:center;">${team.score_pending}</td>
+      <td style="padding:6px; text-align:center;">${team.penalty_outstanding > 0 ? '−' + team.penalty_outstanding : '0'}</td>
+      <td style="padding:6px; text-align:center;"><strong>${team.score_net}</strong></td>
       <td style="padding:6px; text-align:center;">
         <form method="post" style="display:inline" onsubmit="return confirm('Delete team ${team.name}?');">
           <input type="hidden" name="_csrf" value="${CSRF}">
@@ -444,9 +445,10 @@ async function loadTasks() {
              '<th style="text-align:left; padding:6px;">ID</th>' +
              '<th style="text-align:left; padding:6px;">Title</th>' +
              '<th style="text-align:center; padding:6px;">Points</th>' +
+             '<th style="text-align:center; padding:6px;">Penalty</th>' +
              '<th style="text-align:center; padding:6px;">Photos</th>' +
              '<th style="text-align:center; padding:6px;">Videos</th>' +
-             '<th style="text-align:center; padding:6px;">Mandatory</th>' +
+             '<th style="text-align:center; padding:6px;">Priority</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
   for (const task of j.tasks) {
@@ -454,6 +456,7 @@ async function loadTasks() {
       <td style="padding:6px;">${task.id}</td>
       <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${task.title}</td>
       <td style="padding:6px; text-align:center;">${task.points}</td>
+      <td style="padding:6px; text-align:center;">${task.penalty > 0 ? '−' + task.penalty : ''}</td>
       <td style="padding:6px; text-align:center;">${task.photos}</td>
       <td style="padding:6px; text-align:center;">${task.videos}</td>
       <td style="padding:6px; text-align:center;">${task.mandatory ? '⭐' : ''}</td>
@@ -492,6 +495,7 @@ document.addEventListener('click', async (e) => {
   f.task_id.value     = t.id;
   f.title.value       = t.title;
   f.points.value      = t.points;
+  f.penalty.value     = t.penalty;
   f.photos.value      = t.photos;
   f.videos.value      = t.videos;
   f.description.value = t.description || '';

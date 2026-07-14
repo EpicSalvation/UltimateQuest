@@ -10,19 +10,20 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $title       = trim($_POST['title'] ?? '');
 $points      = intval($_POST['points'] ?? 0);
+$penalty     = abs(intval($_POST['penalty'] ?? 0)); // stored positive; scoring subtracts it
 $photos      = intval($_POST['photos'] ?? 0);
 $videos      = intval($_POST['videos'] ?? 0);
 $description = trim($_POST['description'] ?? '');
-$mandatory   = !empty($_POST['mandatory']) ? 1 : 0;
+$mandatory   = !empty($_POST['mandatory']) ? 1 : 0; // "Priority" flag in the UI
 
 if (!$title || $points <= 0) {
     echo json_encode(['success' => false, 'error' => 'Title and positive points required']); exit;
 }
 
 $st = db()->prepare(
-    'INSERT INTO tasks (title, description, points, photos_required, videos_required, mandatory, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT max_o FROM (SELECT MAX(sort_order) AS max_o FROM tasks) x), 0) + 1)'
+    'INSERT INTO tasks (title, description, points, penalty, photos_required, videos_required, mandatory, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT max_o FROM (SELECT MAX(sort_order) AS max_o FROM tasks) x), 0) + 1)'
 );
-$st->execute([$title, $description, $points, $photos, $videos, $mandatory]);
+$st->execute([$title, $description, $points, $penalty, $photos, $videos, $mandatory]);
 
 echo json_encode(['success' => true, 'message' => 'Task added successfully']);

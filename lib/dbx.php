@@ -30,6 +30,14 @@ function ensure_schema_upgrades(PDO $pdo): void {
             }
             $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','2') ON DUPLICATE KEY UPDATE v=VALUES(v)");
         }
+        if ($v < 3) {
+            // Per-task non-completion penalty, stored positive; scoring subtracts it.
+            $col = $pdo->query("SHOW COLUMNS FROM tasks LIKE 'penalty'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE tasks ADD COLUMN penalty INT UNSIGNED NOT NULL DEFAULT 0 AFTER points");
+            }
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','3') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
     } catch (Throwable $e) {
         // Non-fatal: app continues; admin can re-run migrate.php if needed.
     }

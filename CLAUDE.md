@@ -19,19 +19,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 State lives in MySQL (InnoDB, utf8mb4). Schema is in `lib/schema.sql` and gets applied by `migrate.php`. Tables:
 
 - `teams(id, name UNIQUE, display_name, pin_hash, created_at)` — `name` is the lowercased-underscored slug; `display_name` is what users see; `pin_hash` is `password_hash`'d.
-- `tasks(id, title, description, points, photos_required, videos_required, sort_order, created_at)`.
+- `tasks(id, title, description, points, penalty, photos_required, videos_required, mandatory, sort_order, created_at)` — `penalty` is the points deducted when a team does NOT complete the task; it is **always stored positive** (inputs like `-25` are normalized) and the scoring queries subtract it. `mandatory` is the "Priority ⭐" flag: it only drives highlighting/labeling in the UI — there is no qualification rule attached to it (admins express the stakes via `penalty`).
 - `submissions(id, team_id FK CASCADE, task_id FK CASCADE, status ENUM('pending','approved','rejected'), note, submitted_at, reviewed_at)` with `UNIQUE(team_id, task_id)` and `KEY(status, submitted_at)`. One row per team/task — resubmission updates the existing row.
 - `submission_files(id, submission_id FK CASCADE, filename, mime_type, byte_size, has_thumb, created_at)`.
 - `settings(k VARCHAR(64) PK, v TEXT)` — holds `event_start_time`, `event_end_time`, `reveal_leaderboard`, `admin_password_hash`. Read with `setting($k, $default)`, write with `set_setting($k, $v)` (both in `lib/dbx.php`).
 
-**Scores are derived, never stored.** The old `score_awarded`/`score_pending` columns are gone. Every page that needs a score computes it inline:
+**Scores are derived, never stored.** The old `score_awarded`/`score_pending` columns are gone. Every page that needs a score computes it inline. A task's `penalty` counts against a team until that task is approved, so the net score is:
 
 ```sql
-SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END) AS score
+COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
+  - (SELECT COALESCE(SUM(penalty), 0) FROM tasks) AS score  -- net
+SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END) AS awarded  -- raw approved points
 SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END) AS pending
 ```
 
-If you find yourself caching a score, stop — the join is cheap and drift is the bug we deliberately removed.
+(Approving a task both awards its points and clears its penalty, hence `points + penalty` minus the constant all-tasks penalty total.) Net score can be negative. If you find yourself caching a score, stop — the join is cheap and drift is the bug we deliberately removed.
 
 **DB access** is `db()` from `lib/dbx.php` — singleton PDO with `ERRMODE_EXCEPTION`, `FETCH_ASSOC`, `EMULATE_PREPARES=false`. Always use prepared statements; never string-interpolate user input.
 
@@ -54,7 +56,7 @@ Thumbs are written to `uploads/<team>/<task_id>/thumbs/<filename>.jpg` (extensio
 ## Request flow
 
 - **Team:** `index.php` → `login.php` (PIN → `password_verify` against `teams.pin_hash`) → `team.php` (lists tasks with per-team status; derives score; renders countdown from `settings.event_start_time`/`event_end_time`) → `task_submit.php` (multi-file upload via XHR with `upload.onprogress` updating a `<progress>` overlay).
-- **Admin:** `admin/index.php` (password vs `settings.admin_password_hash`) → `admin/dashboard.php`. Dashboard polls `api/get_pending.php` (10s), `api/get_teams.php` (15s), `api/get_tasks.php` (20s); mutations go to `api/approve.php`, `api/reject.php`, `api/add_task.php`, `api/edit_task.php`, `api/delete_task.php`. `admin/status.php` is the read-only health/metrics page (auto-refresh 15s).
+- **Admin:** `admin/index.php` (password vs `settings.admin_password_hash`) → `admin/dashboard.php`. Dashboard polls `api/get_pending.php` (10s), `api/get_teams.php` (15s), `api/get_tasks.php` (20s); mutations go to `api/approve.php`, `api/reject.php`, `api/add_task.php`, `api/edit_task.php`, `api/delete_task.php`. `admin/import_tasks.php` bulk-imports tasks from a CSV (upload → column-mapping form with auto-guessed headers → append or purge-and-replace; parsed rows staged in the session). `admin/status.php` is the read-only health/metrics page (auto-refresh 15s).
 - **Media:** uploads under `DATA_DIR/uploads/<team>/<task_id>/` are outside the webroot. `api/file.php` (admin-only) streams full files; `api/thumb.php` (admin-only) streams thumbs. New media UI must use one of these.
 - **Auth gates:** every page/endpoint starts with `require_once lib/auth.php` and calls `require_team()` or `require_admin()`. These redirect (via `BASE_URL`) on failure rather than returning errors. Match this pattern for new endpoints.
 
@@ -67,6 +69,8 @@ Thumbs are written to `uploads/<team>/<task_id>/thumbs/<filename>.jpg` (extensio
 ## Conventions worth preserving
 
 - Team `name` is the canonical lowercased-underscored slug (`normalize_team_name()` in `lib/auth.php`); `display_name` is what users see. URLs and disk paths use `name`.
+- The `tasks.mandatory` column (and the `mandatory` key in JSON/POST payloads) is presented to users as **"Priority"** — keep the internal name for upgrade compatibility, but never surface the word "mandatory"/"required" (or any qualification language) in UI text.
+- `tasks.penalty` is always stored as a positive integer; normalize inputs with `abs(intval(...))` and let the SUM/CASE scoring pattern do the subtraction.
 - Task IDs are auto-increment integers from `tasks.id`.
 - Cache-bust `<link rel=stylesheet>` with `?v=<?=@filemtime(__DIR__.'/style.css')?>` (relative to the file itself — no DOCUMENT_ROOT lookups).
 - Upload MIME allowlist + extension fallback for `application/octet-stream` lives in `task_submit.php`. Phones send HEIC or octet-stream often; both the allowlist and the extension fallback are load-bearing — keep them.

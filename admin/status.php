@@ -88,6 +88,8 @@ $status_map = ['pending' => 0, 'approved' => 0, 'rejected' => 0];
 foreach ($status_counts as $row) $status_map[$row['status']] = (int)$row['c'];
 
 // ----- Game metrics -----
+// Net score = SUM(approved: points + penalty) - SUM(all task penalties):
+// every task's penalty counts against a team until that task is approved.
 $per_team = $pdo->query(
     "SELECT t.name,
             SUM(s.status='approved') AS approved,
@@ -95,24 +97,26 @@ $per_team = $pdo->query(
             SUM(s.status='rejected') AS rejected,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END),0) AS awarded,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END),0) AS pending_pts,
+            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END),0)
+              - (SELECT COALESCE(SUM(penalty),0) FROM tasks) AS net,
             GREATEST(COALESCE(MAX(s.submitted_at),'1970-01-01'),
                      COALESCE(MAX(s.reviewed_at), '1970-01-01')) AS last_activity
        FROM teams t
        LEFT JOIN submissions s ON s.team_id = t.id
        LEFT JOIN tasks tk      ON tk.id    = s.task_id
        GROUP BY t.id, t.name
-       ORDER BY awarded DESC, t.name"
+       ORDER BY net DESC, t.name"
 )->fetchAll();
 
 $per_task = $pdo->query(
-    "SELECT tk.id, tk.title, tk.points,
+    "SELECT tk.id, tk.title, tk.points, tk.penalty,
             COUNT(s.id) AS attempts,
             SUM(s.status='approved') AS approved,
             SUM(s.status='rejected') AS rejected,
             SUM(s.status='pending')  AS pending
        FROM tasks tk
        LEFT JOIN submissions s ON s.task_id = tk.id
-       GROUP BY tk.id, tk.title, tk.points
+       GROUP BY tk.id, tk.title, tk.points, tk.penalty
        ORDER BY tk.sort_order, tk.id"
 )->fetchAll();
 
@@ -285,7 +289,7 @@ if (is_file($err_log)) {
     <table class="status">
       <tr><th>Team</th>
           <th class="num">✅</th><th class="num">🕓</th><th class="num">❌</th>
-          <th class="num">Awarded</th><th class="num">Pending pts</th>
+          <th class="num">Awarded</th><th class="num">Pending pts</th><th class="num">Net score</th>
           <th>Last activity</th></tr>
       <?php foreach ($per_team as $r): ?>
         <tr>
@@ -295,6 +299,7 @@ if (is_file($err_log)) {
           <td class="num"><?=(int)$r['rejected']?></td>
           <td class="num"><?=(int)$r['awarded']?></td>
           <td class="num"><?=(int)$r['pending_pts']?></td>
+          <td class="num"><strong><?=(int)$r['net']?></strong></td>
           <td><?=$r['last_activity'] && substr($r['last_activity'],0,4)!=='1970' ? htmlspecialchars($r['last_activity']) : '—'?></td>
         </tr>
       <?php endforeach; ?>
@@ -306,7 +311,7 @@ if (is_file($err_log)) {
   <h2>Per task</h2>
   <?php if (!$per_task): ?><p class="small">No tasks yet.</p><?php else: ?>
     <table class="status">
-      <tr><th>#</th><th>Task</th><th class="num">Pts</th>
+      <tr><th>#</th><th>Task</th><th class="num">Pts</th><th class="num">Penalty</th>
           <th class="num">Attempts</th><th class="num">✅</th><th class="num">🕓</th><th class="num">❌</th>
           <th class="num">Approval rate</th></tr>
       <?php foreach ($per_task as $r):
@@ -317,6 +322,7 @@ if (is_file($err_log)) {
           <td><?=(int)$r['id']?></td>
           <td><?=htmlspecialchars($r['title'])?></td>
           <td class="num"><?=(int)$r['points']?></td>
+          <td class="num"><?= (int)$r['penalty'] > 0 ? '−' . (int)$r['penalty'] : '—' ?></td>
           <td class="num"><?=(int)$r['attempts']?></td>
           <td class="num"><?=(int)$r['approved']?></td>
           <td class="num"><?=(int)$r['pending']?></td>

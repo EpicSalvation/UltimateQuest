@@ -12,9 +12,12 @@ if (!$isAdmin && setting('reveal_leaderboard') !== '1') {
     header('Location: ' . BASE_URL . '/team.php'); exit;
 }
 
+// Net score: approved points minus the penalty of every task the team has
+// not (yet) completed — i.e. SUM(approved: points + penalty) - SUM(all penalties).
 $rows = db()->query(
     "SELECT t.name,
-            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS score,
+            COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
+              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks) AS score,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END), 0) AS pending,
             MAX(s.reviewed_at) AS last_reviewed
        FROM teams t
