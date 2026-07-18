@@ -13,7 +13,7 @@ if (!$team_name || !$task_id) {
 $st = db()->prepare(
     'SELECT s.id   AS submission_id,
             t.id   AS team_id,
-            tk.id  AS task_id, tk.title, tk.points
+            tk.id  AS task_id, tk.task_no, tk.title, tk.points
        FROM submissions s
        JOIN teams t  ON t.id  = s.team_id
        JOIN tasks tk ON tk.id = s.task_id
@@ -49,8 +49,11 @@ foreach ($file_rows as $f) {
     ];
 }
 
+$task_no = trim((string)($row['task_no'] ?? ''));
+$modal_title = ($task_no !== '' ? $task_no . ' — ' : '') . $row['title'];
+
 echo json_encode([
     'success' => true,
-    'task'    => ['title' => $row['title'], 'points' => (int)$row['points']],
+    'task'    => ['title' => $modal_title, 'points' => (int)$row['points']],
     'files'   => $files,
 ]);

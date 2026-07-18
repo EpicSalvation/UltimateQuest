@@ -31,10 +31,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_event'])) {
     $start_dt = DateTime::createFromFormat('Y-m-d\TH:i', $start, new DateTimeZone('America/New_York'));
     $end_dt   = DateTime::createFromFormat('Y-m-d\TH:i', $end,   new DateTimeZone('America/New_York'));
 
+    // Unlock gate: first N tasks must be submitted before the rest open. 0 = off.
+    $gate_count = max(0, intval($_POST['starter_gate_count'] ?? 0));
+
     if ($start_dt && $end_dt) {
         set_setting('event_start_time',         $start_dt->format('Y-m-d H:i:s'));
         set_setting('event_end_time',           $end_dt->format('Y-m-d H:i:s'));
         set_setting('reveal_leaderboard',       $reveal ? '1' : '0');
+        set_setting('starter_gate_count',       (string)$gate_count);
         set_setting('help_phone',               $help_phone);
         set_setting('help_phone2',              $help_phone2);
         set_setting('help_phone_name',          $help_phone_name);
@@ -73,6 +77,8 @@ $end_val   = '';
 $start_str = setting('event_start_time');
 $end_str   = setting('event_end_time');
 $reveal    = setting('reveal_leaderboard') === '1';
+$gate_count_val = starter_gate_count();
+$task_total     = (int)db()->query('SELECT COUNT(*) FROM tasks')->fetchColumn();
 $help_phone_val        = (string)(setting('help_phone') ?? '');
 $help_phone2_val       = (string)(setting('help_phone2') ?? '');
 $help_phone_name_val   = (string)(setting('help_phone_name') ?? '');
@@ -158,6 +164,11 @@ if ($end_str) {
       <span>Reveal Leaderboard</span>
       <input type="checkbox" name="reveal_leaderboard" <?=$reveal?'checked':''?> style="margin:0;">
     </label>
+    <label>Unlock gate — first N tasks must be submitted to unlock the rest (0 = off):
+      <input type="number" name="starter_gate_count" min="0" max="<?=$task_total?>" value="<?=$gate_count_val?>">
+    </label>
+    <p class="small" style="margin:2px 0 0;">The first <strong><?=$gate_count_val?></strong> task<?=$gate_count_val===1?'':'s'?> in list order
+      <?php if ($gate_count_val > 0): ?>gate the rest — a team must submit all of them (pending or approved counts; a rejected one re-locks) before any other task opens.<?php else: ?>are not gating anything; every task is open from the start.<?php endif; ?></p>
     <label>Help contact 1 name (Optional &mdash; shown to teams):
       <input type="text" name="help_phone_name" value="<?=htmlspecialchars($help_phone_name_val)?>" placeholder="Game host name">
     </label>
@@ -183,6 +194,7 @@ if ($end_str) {
   <form method="post" class="grid-5" id="add-task-form">
     <input type="hidden" name="_csrf" value="<?=htmlspecialchars(csrf_token())?>">
     <input type="hidden" name="add_task" value="1">
+    <label>Task #: <input type="text" name="task_no" maxlength="16" placeholder="e.g. 1a" style="max-width:6em;"></label>
     <label>Title: <input type="text" name="title" required></label>
     <label>Points: <input type="number" name="points" min="0" required></label>
     <label>Penalty if skipped: <input type="number" name="penalty" min="0" value="0"></label>
@@ -193,6 +205,9 @@ if ($end_str) {
     </label>
     <label style="display:flex; align-items:center; gap:8px;">
       <input type="checkbox" name="mandatory" value="1"> Priority ⭐
+    </label>
+    <label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" name="bonus" value="1"> Bonus 🎁
     </label>
     <button type="submit">Add</button>
   </form>
@@ -266,6 +281,7 @@ if ($end_str) {
     <h3>Edit Task</h3>
     <form id="edit-task-form">
       <input type="hidden" name="task_id">
+      <label>Task #: <input type="text" name="task_no" maxlength="16" placeholder="e.g. 1a"></label>
       <label>Title: <input type="text" name="title" required></label>
       <label>Points: <input type="number" name="points" min="0" required></label>
       <label>Penalty if skipped: <input type="number" name="penalty" min="0" value="0"></label>
@@ -276,6 +292,9 @@ if ($end_str) {
       </label>
       <label style="display:flex; align-items:center; gap:8px;">
         <input type="checkbox" name="mandatory" value="1"> Priority ⭐
+      </label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" name="bonus" value="1"> Bonus 🎁
       </label>
       <div class="center">
         <button type="submit">Save Changes</button>
@@ -464,24 +483,30 @@ async function loadTasks() {
   if (!j.tasks || j.tasks.length === 0) { tasksTable.textContent = 'No tasks found.'; return; }
   let html = '<table style="width:100%; border-collapse:collapse;">' +
              '<tr>' +
-             '<th style="text-align:left; padding:6px;">ID</th>' +
+             '<th style="text-align:left; padding:6px;">Task #</th>' +
              '<th style="text-align:left; padding:6px;">Title</th>' +
              '<th style="text-align:center; padding:6px;">Points</th>' +
              '<th style="text-align:center; padding:6px;">Penalty</th>' +
              '<th style="text-align:center; padding:6px;">Photos</th>' +
              '<th style="text-align:center; padding:6px;">Videos</th>' +
-             '<th style="text-align:center; padding:6px;">Priority</th>' +
+             '<th style="text-align:center; padding:6px;">Flags</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
   for (const task of j.tasks) {
+    const flags = [];
+    if (task.mandatory) flags.push('<span title="Priority">⭐</span>');
+    if (task.bonus)     flags.push('<span title="Bonus challenge">🎁</span>');
+    if (task.starter)   flags.push('<span title="Starter — gates the rest">🔓</span>');
+    // Task # cell shows the human label, falling back to the internal id.
+    const noLabel = task.task_no ? esc(task.task_no) : '#' + task.id;
     html += `<tr style="border-bottom:1px solid rgba(0,0,0,0.1);">
-      <td style="padding:6px;">${task.id}</td>
-      <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${esc(task.title)}</td>
+      <td style="padding:6px;">${noLabel}</td>
+      <td style="padding:6px;">${task.mandatory ? '⭐ ' : ''}${task.bonus ? '🎁 ' : ''}${esc(task.title)}</td>
       <td style="padding:6px; text-align:center;">${task.points}</td>
       <td style="padding:6px; text-align:center;">${task.penalty > 0 ? '−' + task.penalty : ''}</td>
       <td style="padding:6px; text-align:center;">${task.photos}</td>
       <td style="padding:6px; text-align:center;">${task.videos}</td>
-      <td style="padding:6px; text-align:center;">${task.mandatory ? '⭐' : ''}</td>
+      <td style="padding:6px; text-align:center;">${flags.join(' ')}</td>
       <td style="padding:6px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px;">
         <button class="edit-task-btn secondary" data-id="${task.id}">Edit</button>
         <button class="delete-task-btn secondary" data-id="${task.id}" data-title="${esc(task.title)}">Delete</button>
@@ -512,6 +537,7 @@ document.addEventListener('click', (e) => {
   const m = document.getElementById('editTaskModal');
   const f = document.getElementById('edit-task-form');
   f.task_id.value     = t.id;
+  f.task_no.value     = t.task_no || '';
   f.title.value       = t.title;
   f.points.value      = t.points;
   f.penalty.value     = t.penalty;
@@ -519,6 +545,7 @@ document.addEventListener('click', (e) => {
   f.videos.value      = t.videos;
   f.description.value = t.description || '';
   f.mandatory.checked = !!t.mandatory;
+  f.bonus.checked     = !!t.bonus;
   m.classList.remove('hidden');
 });
 

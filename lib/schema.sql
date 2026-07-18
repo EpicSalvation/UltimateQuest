@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id              INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  -- Human-facing task number/label, separate from the auto-increment id so it
+  -- can carry suffixes like "1a" (main) / "1b" (bonus). Display only.
+  task_no         VARCHAR(16) NULL,
   title           VARCHAR(255) NOT NULL,
   description     TEXT NULL,
   points          INT UNSIGNED NOT NULL DEFAULT 0,
@@ -26,6 +29,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   videos_required TINYINT UNSIGNED NOT NULL DEFAULT 0,
   -- "Priority" flag in the UI (kept as `mandatory` for upgrade compatibility).
   mandatory       TINYINT(1) NOT NULL DEFAULT 0,
+  -- "Bonus challenge" flag — highlighted in the UI (e.g. the "b" task).
+  bonus           TINYINT(1) NOT NULL DEFAULT 0,
   sort_order      INT NOT NULL DEFAULT 0,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)

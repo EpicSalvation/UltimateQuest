@@ -46,6 +46,19 @@ function ensure_schema_upgrades(PDO $pdo): void {
             }
             $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','4') ON DUPLICATE KEY UPDATE v=VALUES(v)");
         }
+        if ($v < 5) {
+            // Human task number ("1a"/"3b"), separate from the auto-increment id.
+            $col = $pdo->query("SHOW COLUMNS FROM tasks LIKE 'task_no'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE tasks ADD COLUMN task_no VARCHAR(16) NULL AFTER id");
+            }
+            // "Bonus challenge" flag — highlighted in the UI like Priority.
+            $col = $pdo->query("SHOW COLUMNS FROM tasks LIKE 'bonus'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE tasks ADD COLUMN bonus TINYINT(1) NOT NULL DEFAULT 0 AFTER mandatory");
+            }
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','5') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
     } catch (Throwable $e) {
         // Non-fatal: app continues; admin can re-run migrate.php if needed.
     }
@@ -63,6 +76,42 @@ function set_setting(string $k, ?string $v): void {
         'INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)'
     );
     $st->execute([$k, $v]);
+}
+
+// ── Starter-task gate ─────────────────────────────────────────────────────
+// Optionally require teams to submit the first N tasks (a test task, prop
+// collection, etc.) before the remaining tasks unlock. "Submitted" means an
+// active submission exists (pending or approved); a rejected or not-yet-started
+// starter leaves the gate closed. N = 0 disables the gate entirely.
+
+/** Number of leading tasks (by list order) that gate the rest. 0 = no gate. */
+function starter_gate_count(): int {
+    return max(0, (int)setting('starter_gate_count', '0'));
+}
+
+/** Ids of the first $n tasks in list order — the "starter" tasks that gate
+ *  the rest. $n is cast to a plain int and inlined (LIMIT can't be bound). */
+function starter_task_ids(int $n): array {
+    if ($n <= 0) return [];
+    $n = (int)$n;
+    $rows = db()->query("SELECT id FROM tasks ORDER BY sort_order, id LIMIT $n")
+                ->fetchAll(PDO::FETCH_COLUMN);
+    return array_map('intval', $rows);
+}
+
+/** True once $team_id has an active (pending/approved) submission for every
+ *  starter task — i.e. the gate is open and the remaining tasks unlock.
+ *  Pass $starter_ids to reuse an already-computed list. */
+function starter_gate_open(int $team_id, ?array $starter_ids = null): bool {
+    $starter_ids ??= starter_task_ids(starter_gate_count());
+    if (!$starter_ids) return true;
+    $in = implode(',', array_fill(0, count($starter_ids), '?'));
+    $st = db()->prepare(
+        "SELECT COUNT(*) FROM submissions
+          WHERE team_id = ? AND status IN ('pending','approved') AND task_id IN ($in)"
+    );
+    $st->execute(array_merge([$team_id], $starter_ids));
+    return (int)$st->fetchColumn() >= count($starter_ids);
 }
 
 /** Slugs of themes the user can pick. The CSS keys off these. */

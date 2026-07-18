@@ -81,7 +81,7 @@ if ($end && $now > $end) {
 
 // Tasks LEFT JOIN this team's submissions; one row per task with status/note (or 'not_started').
 $st = db()->prepare(
-    "SELECT tk.id, tk.title, tk.points, tk.penalty, tk.mandatory,
+    "SELECT tk.id, tk.task_no, tk.title, tk.points, tk.penalty, tk.mandatory, tk.bonus,
             COALESCE(s.status, 'not_started') AS status,
             s.note
        FROM tasks tk
@@ -92,13 +92,34 @@ $st->execute([$team_id]);
 $task_list = $st->fetchAll();
 foreach ($task_list as &$t) {
     $t['id']        = (int)$t['id'];
+    $t['task_no']   = (string)($t['task_no'] ?? '');
     $t['points']    = (int)$t['points'];
     $t['penalty']   = (int)$t['penalty'];
     $t['mandatory'] = (int)$t['mandatory'];
+    $t['bonus']     = (int)$t['bonus'];
 }
 unset($t);
 
-usort($task_list, function ($a, $b) {
+// Starter-task unlock gate. Until the team has submitted the first N tasks
+// (pending or approved), the remaining tasks are visible but locked.
+$gate_count  = starter_gate_count();
+$starter_ids = starter_task_ids($gate_count);
+$starter_set = array_flip($starter_ids);
+$gate_open   = starter_gate_open($team_id, $starter_ids);
+// Starter tasks still needing a submission (rejected/not_started), for the notice.
+$starter_todo = array_values(array_filter(
+    $task_list,
+    fn($t) => isset($starter_set[$t['id']]) && !in_array($t['status'], ['pending', 'approved'], true)
+));
+
+// A task is locked when the gate is closed and it isn't one of the starters.
+$is_locked = fn(array $t): bool => !$gate_open && !isset($starter_set[$t['id']]);
+
+usort($task_list, function ($a, $b) use ($is_locked) {
+    // Locked tasks sink below everything the team can act on right now.
+    $a_l = $is_locked($a) ? 1 : 0;
+    $b_l = $is_locked($b) ? 1 : 0;
+    if ($a_l !== $b_l) return $a_l <=> $b_l;
     $order = ['pending' => 1, 'rejected' => 2, 'not_started' => 3, 'approved' => 4];
     $a_o = $order[$a['status']] ?? 99;
     $b_o = $order[$b['status']] ?? 99;
@@ -252,11 +273,26 @@ function format_phone_display(string $raw): string {
 
 <div class="card">
   <h2>Available Tasks</h2>
+  <?php if ($gate_count > 0 && !$gate_open): ?>
+    <div class="alert" style="border:2px solid #c98a00; background:rgba(255,193,7,0.12);">
+      <p style="margin:0; font-weight:600;">🔒 Finish your starting tasks first</p>
+      <p class="small" style="margin:6px 0 0;">
+        The rest of the quest unlocks once your team submits
+        <?php if ($starter_todo): ?>
+          <strong><?=implode('</strong>, <strong>', array_map(fn($t) => htmlspecialchars($t['task_no'] !== '' ? $t['task_no'] : ('#' . $t['id'])), $starter_todo))?></strong>.
+        <?php else: ?>
+          the first <?=$gate_count?> task<?=$gate_count===1?'':'s'?>.
+        <?php endif; ?>
+        (Submitting is enough — you don't have to wait for approval. A rejected starting task must be resubmitted.)
+      </p>
+    </div>
+  <?php endif; ?>
   <?php $show_penalty_col = $total_penalty > 0; $col_count = $show_penalty_col ? 6 : 5; ?>
   <table style="width:100%; border-collapse:collapse;">
-    <tr><th class="center">ID</th><th style="text-align:left;">Task</th><th class="center">Points</th><?php if ($show_penalty_col): ?><th class="center">Penalty if skipped</th><?php endif; ?><th class="center">Status</th><th></th></tr>
+    <tr><th class="center">#</th><th style="text-align:left;">Task</th><th class="center">Points</th><?php if ($show_penalty_col): ?><th class="center">Penalty if skipped</th><?php endif; ?><th class="center">Status</th><th></th></tr>
     <?php foreach ($task_list as $t): ?>
       <?php
+        $locked = $is_locked($t);
         $color = match($t['status']) {
           'approved' => 'green',
           'pending'  => 'orange',
@@ -264,15 +300,27 @@ function format_phone_display(string $raw): string {
           default    => '#555',
         };
         $label = ucfirst(str_replace('_', ' ', $t['status']));
+        $no_label = $t['task_no'] !== '' ? $t['task_no'] : (string)$t['id'];
+        // Row highlight: bonus (violet) takes precedence over priority (amber);
+        // a task can be both flagged, but one background reads more clearly.
+        $row_style = $locked ? ' style="opacity:0.55;"'
+                   : ($t['bonus'] ? ' style="background:rgba(147,112,219,0.15);"'
+                   : ($t['mandatory'] ? ' style="background:rgba(255,193,7,0.12);"' : ''));
+        $row_class = trim(($t['mandatory'] ? 'mandatory-row ' : '') . ($t['bonus'] ? 'bonus-row' : ''));
       ?>
-      <tr<?= $t['mandatory'] ? ' class="mandatory-row" style="background:rgba(255,193,7,0.12);"' : '' ?>>
-        <td class="center"><?=$t['id']?></td>
+      <tr<?= $row_class ? ' class="' . $row_class . '"' : '' ?><?=$row_style?>>
+        <td class="center"><?=htmlspecialchars($no_label)?></td>
         <td>
           <?php if ($t['mandatory']): ?>
             <span title="Priority task" style="color:#c98a00;">⭐</span>
           <?php endif; ?>
-          <strong<?= $t['mandatory'] ? ' style="border-bottom:2px solid #c98a00;"' : '' ?>><?=htmlspecialchars($t['title'])?></strong>
-          <?php if ($t['mandatory']): ?>
+          <?php if ($t['bonus']): ?>
+            <span title="Bonus challenge" style="color:#6a3fb5;">🎁</span>
+          <?php endif; ?>
+          <strong<?= $t['bonus'] ? ' style="border-bottom:2px solid #6a3fb5;"' : ($t['mandatory'] ? ' style="border-bottom:2px solid #c98a00;"' : '') ?>><?=htmlspecialchars($t['title'])?></strong>
+          <?php if ($t['bonus']): ?>
+            <span class="small" style="color:#6a3fb5; font-weight:600;">(Bonus)</span>
+          <?php elseif ($t['mandatory']): ?>
             <span class="small" style="color:#c98a00; font-weight:600;">(Priority)</span>
           <?php endif; ?>
         </td>
@@ -282,7 +330,11 @@ function format_phone_display(string $raw): string {
         <?php endif; ?>
         <td class="center" style="color:<?=$color?>;font-weight:600;"><?=$label?></td>
         <td class="center">
-          <a href="<?=BASE_URL?>/task_submit.php?id=<?=$t['id']?>">Open</a>
+          <?php if ($locked): ?>
+            <span title="Complete your starting tasks to unlock" style="color:#888; font-weight:600;">🔒 Locked</span>
+          <?php else: ?>
+            <a href="<?=BASE_URL?>/task_submit.php?id=<?=$t['id']?>">Open</a>
+          <?php endif; ?>
         </td>
       </tr>
       <?php if ($t['status'] === 'rejected' && $t['note']): ?>

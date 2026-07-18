@@ -21,14 +21,21 @@ const CSV_MAX_ROWS  = 2000;
 const CSV_SESSION_KEY = 'task_csv_import';
 
 // Target fields, in display order. 'title' is the only one that must be mapped.
+// 'id' is optional: when mapped, the CSV value becomes the task's id (useful for
+// keeping numbers stable across re-imports). When left unmapped, ids are assigned
+// automatically — and a purge-and-replace import restarts them from 1.
 $FIELDS = [
+    'id'          => 'Task ID (optional, internal key)',
+    'task_no'     => 'Task # / label (e.g. 1a, 3b)',
     'title'       => 'Title',
     'description' => 'Description',
     'points'      => 'Points',
     'penalty'     => 'Point penalty (if skipped)',
+    'media'       => 'Photo/Video (one column: pic / video / both)',
     'photos'      => '# Photos required',
     'videos'      => '# Videos required',
     'priority'    => 'Priority ⭐',
+    'bonus'       => 'Bonus 🎁',
 ];
 
 // Header keywords for auto-guessing the mapping. Checked in this order and
@@ -37,11 +44,22 @@ $FIELDS = [
 $GUESSES = [
     'penalty'     => ['penalty', 'deduction', 'deduct', 'minus'],
     'points'      => ['points', 'pts', 'value', 'worth', 'score'],
+    // A single combined column ("Media" / "Evidence" / "Photo/Video") — checked
+    // before the separate photo/video guesses so those don't grab it first.
+    'media'       => ['photovideo', 'picvideo', 'media', 'evidence', 'proof', 'capture'],
     'photos'      => ['photo', 'pic', 'image'],
     'videos'      => ['video', 'vid'],
     'priority'    => ['priority', 'mandatory', 'required', 'star'],
+    // 'bonus' before 'title' but WITHOUT the word "challenge" (a common Title
+    // header) so a "Challenge" column stays the title, not the bonus flag.
+    'bonus'       => ['bonus', 'extracredit', 'extrapoints'],
+    // Human task number/label ("1a", "3b"). Grabs the number-ish headers that
+    // used to fall to 'id', since those are now the display label, not the key.
+    'task_no'     => ['taskno', 'tasknumber', 'tasknum', 'clueno', 'cluenumber', 'itemno', 'itemnumber', 'tasklabel', 'number'],
     'description' => ['description', 'desc', 'detail', 'instruction', 'note'],
     'title'       => ['title', 'task', 'clue', 'name', 'challenge'],
+    // 'id' last so it can't steal columns like "video" (which contains "id").
+    'id'          => ['taskid', 'clueid', 'rowid', 'recordid', 'uid', 'id'],
 ];
 
 function norm_header(string $s): string {
@@ -77,11 +95,43 @@ function parse_int_loose(?string $s): int {
     return abs((int)$m[0]);
 }
 
+/** Interpret a single combined media column into [photos, videos], each 0 or 1.
+ *  Forgiving about wording and capitalization: "pic"/"photo"/"image"/"img"/"p"
+ *  → a photo; "video"/"vid"/"movie"/"clip"/"v" → a video; "both"/"all"/"either",
+ *  or any cell naming both a photo and a video ("photo & video", "pic/vid"),
+ *  → one of each. Blank / unrecognized → [0, 0]. */
+function parse_media(?string $s): array {
+    $s = strtolower(trim((string)$s));
+    if ($s === '') return [0, 0];
+    if (preg_match('/\b(both|all|either|each)\b/', $s)) return [1, 1];
+    $has_pic   = $s === 'p' || (bool)preg_match('/pic|photo|image|img|snapshot|selfie/', $s);
+    $has_video = $s === 'v' || (bool)preg_match('/vid|video|movie|clip|film|footage|reel/', $s);
+    if ($has_pic && $has_video) return [1, 1];
+    if ($has_pic)   return [1, 0];
+    if ($has_video) return [0, 1];
+    return [0, 0];
+}
+
 function parse_truthy(?string $s): bool {
     $s = strtolower(trim((string)$s));
     if ($s === '') return false;
     if (is_numeric($s)) return (float)$s != 0;
     return in_array($s, ['y', 'yes', 'true', 'x', 'p', 'star', 'priority', 'mandatory', 'required', '⭐'], true);
+}
+
+/** Bonus flag from an explicit bonus column. Accepts "1"/"yes"/"x", a lone
+ *  "b" (matching the "3b" numbering convention), or anything containing "bonus". */
+function parse_bonus(?string $s): bool {
+    $s = strtolower(trim((string)$s));
+    if ($s === '') return false;
+    if (is_numeric($s)) return (float)$s != 0;
+    return in_array($s, ['b', 'bonus', 'y', 'yes', 'true', 'x', '🎁'], true) || str_contains($s, 'bonus');
+}
+
+/** True when a task-number label denotes a bonus by the "b" suffix convention
+ *  ("3b", "1 b"). Used to infer bonus when no explicit bonus column is mapped. */
+function task_no_is_bonus(string $task_no): bool {
+    return (bool)preg_match('/\d\s*b$/i', trim($task_no));
 }
 
 /** Parse raw CSV text into rows. Sniffs the delimiter (comma/semicolon/tab)
@@ -167,20 +217,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     return isset($map[$field]) ? ($row[$map[$field]] ?? null) : null;
                 };
 
+                $id_from_csv    = isset($map['id']);
+                $bonus_from_csv = isset($map['bonus']);
+                // A combined media column supersedes the separate photo/video
+                // columns (which the UI also clears) to avoid conflicting counts.
+                $media_from_csv = isset($map['media']);
+                if ($media_from_csv) { unset($map['photos'], $map['videos']); }
                 $tasks   = [];
                 $skipped = 0;
                 $data_rows = $has_header ? array_slice($rows, 1) : $rows;
                 foreach ($data_rows as $row) {
                     $title = trim((string)$cell($row, 'title'));
                     if ($title === '') { $skipped++; continue; }
+                    if ($media_from_csv) {
+                        [$photos, $videos] = parse_media($cell($row, 'media'));
+                    } else {
+                        $photos = min(255, parse_int_loose($cell($row, 'photos')));
+                        $videos = min(255, parse_int_loose($cell($row, 'videos')));
+                    }
+                    $task_no = mb_substr(trim((string)$cell($row, 'task_no')), 0, 16);
+                    // Explicit bonus column wins; otherwise infer from a "…b"
+                    // task number (the "3a main / 3b bonus" convention).
+                    $bonus = $bonus_from_csv
+                        ? (parse_bonus($cell($row, 'bonus')) ? 1 : 0)
+                        : (task_no_is_bonus($task_no) ? 1 : 0);
                     $tasks[] = [
+                        // 0 means "no explicit id" — assign one automatically.
+                        'id'          => $id_from_csv ? parse_int_loose($cell($row, 'id')) : 0,
+                        'task_no'     => $task_no,
                         'title'       => mb_substr($title, 0, 255),
                         'description' => trim((string)$cell($row, 'description')),
                         'points'      => parse_int_loose($cell($row, 'points')),
                         'penalty'     => parse_int_loose($cell($row, 'penalty')),
-                        'photos'      => min(255, parse_int_loose($cell($row, 'photos'))),
-                        'videos'      => min(255, parse_int_loose($cell($row, 'videos'))),
+                        'photos'      => $photos,
+                        'videos'      => $videos,
                         'priority'    => parse_truthy($cell($row, 'priority')) ? 1 : 0,
+                        'bonus'       => $bonus,
                     ];
                 }
 
@@ -199,18 +271,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         } else {
                             $base_sort = (int)$pdo->query('SELECT COALESCE(MAX(sort_order), 0) FROM tasks')->fetchColumn();
                         }
-                        $ins = $pdo->prepare(
-                            'INSERT INTO tasks (title, description, points, penalty, photos_required, videos_required, mandatory, sort_order)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                        $ins_auto = $pdo->prepare(
+                            'INSERT INTO tasks (task_no, title, description, points, penalty, photos_required, videos_required, mandatory, bonus, sort_order)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                        );
+                        $ins_id = $pdo->prepare(
+                            'INSERT INTO tasks (id, task_no, title, description, points, penalty, photos_required, videos_required, mandatory, bonus, sort_order)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                         );
                         foreach ($tasks as $i => $t) {
-                            $ins->execute([
-                                $t['title'], $t['description'], $t['points'], $t['penalty'],
-                                $t['photos'], $t['videos'], $t['priority'],
-                                $base_sort + $i + 1,
-                            ]);
+                            $sort = $base_sort + $i + 1;
+                            $task_no = $t['task_no'] !== '' ? $t['task_no'] : null;
+                            // Decide the id: explicit from CSV, or (on a purge-and-
+                            // replace) a fresh sequence from 1, else auto-increment.
+                            if ($id_from_csv && $t['id'] > 0) {
+                                $explicit = $t['id'];
+                            } elseif (!$id_from_csv && $mode === 'replace') {
+                                $explicit = $i + 1;
+                            } else {
+                                $explicit = null;
+                            }
+                            if ($explicit !== null) {
+                                $ins_id->execute([
+                                    $explicit, $task_no, $t['title'], $t['description'], $t['points'], $t['penalty'],
+                                    $t['photos'], $t['videos'], $t['priority'], $t['bonus'], $sort,
+                                ]);
+                            } else {
+                                $ins_auto->execute([
+                                    $task_no, $t['title'], $t['description'], $t['points'], $t['penalty'],
+                                    $t['photos'], $t['videos'], $t['priority'], $t['bonus'], $sort,
+                                ]);
+                            }
                         }
                         $pdo->commit();
+                        // Realign the AUTO_INCREMENT counter after inserting explicit
+                        // ids (InnoDB clamps this up to MAX(id)+1) so future
+                        // dashboard-added tasks continue past the imported ids and
+                        // don't collide. DDL, so it runs after the commit.
+                        if ($mode === 'replace' || $id_from_csv) {
+                            try { $pdo->exec('ALTER TABLE tasks AUTO_INCREMENT = 1'); } catch (Throwable $e) { /* non-fatal */ }
+                        }
                     } catch (Throwable $e) {
                         $pdo->rollBack();
                         $err   = 'Import failed, nothing was changed: ' . $e->getMessage();
@@ -219,10 +319,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$err) {
                         unset($_SESSION[CSV_SESSION_KEY]);
                         $result = [
-                            'inserted'   => count($tasks),
-                            'skipped'    => $skipped,
-                            'mode'       => $mode,
-                            'zero_point' => count(array_filter($tasks, fn($t) => $t['points'] === 0)),
+                            'inserted'    => count($tasks),
+                            'skipped'     => $skipped,
+                            'mode'        => $mode,
+                            'id_from_csv' => $id_from_csv,
+                            'zero_point'  => count(array_filter($tasks, fn($t) => $t['points'] === 0)),
                         ];
                         $stage = 'done';
                     }
@@ -336,10 +437,34 @@ if ($stage === 'map') {
       <?php endforeach; ?>
     </div>
 
+    <script>
+    // The combined "Photo/Video" column and the separate photo/video columns are
+    // mutually exclusive — picking one clears the other so counts can't conflict.
+    (function () {
+      var sel = function (f) { return document.querySelector('select[name="map[' + f + ']"]'); };
+      var media = sel('media'), photos = sel('photos'), videos = sel('videos');
+      if (!media) return;
+      var fromMedia = function () { if (media.value !== '') { if (photos) photos.value = ''; if (videos) videos.value = ''; } };
+      var toMedia = function () { if ((photos && photos.value !== '') || (videos && videos.value !== '')) media.value = ''; };
+      media.addEventListener('change', fromMedia);
+      if (photos) photos.addEventListener('change', toMedia);
+      if (videos) videos.addEventListener('change', toMedia);
+      fromMedia(); // reconcile auto-guessed defaults on load
+    })();
+    </script>
+
     <p class="small center" style="margin-top:8px;">
       Point penalties may be written as <code>25</code> or <code>-25</code> in the CSV —
       either way they're stored as a positive amount that gets deducted when the task isn't completed.
+      A single <strong>Photo/Video</strong> column accepts values like <code>pic</code>, <code>video</code>,
+      or <code>both</code> (and near-misses like <code>photo</code>, <code>vid</code>, <code>P</code>) and sets
+      one of each required accordingly — choosing it clears the separate photo/video columns.
       The Priority column counts values like <code>1</code>, <code>yes</code>, <code>x</code>, or <code>⭐</code> as priority.
+      <strong>Task #</strong> is the human label shown to teams (e.g. <code>1a</code>, <code>3b</code>) and is separate from the
+      internal <strong>Task ID</strong> key — mapping Task ID is optional, leave it unmapped to let ids be assigned automatically
+      (a purge-and-replace import restarts ids from&nbsp;1).
+      For <strong>Bonus</strong>, map a column (values like <code>bonus</code>, <code>b</code>, <code>yes</code>) — or, if you don't,
+      any task whose <strong>Task #</strong> ends in <code>b</code> (like <code>3b</code>) is flagged as a bonus automatically.
     </p>
 
     <h3 class="center" style="margin-top:16px;">Existing tasks</h3>
@@ -365,7 +490,13 @@ if ($stage === 'map') {
 <div class="card center">
   <h2>Import complete ✅</h2>
   <p><strong><?=$result['inserted']?></strong> task<?=$result['inserted']===1?'':'s'?> imported
-     (<?= $result['mode'] === 'replace' ? 'replaced the old task list' : 'appended to the existing list' ?>).</p>
+     (<?php
+        if ($result['mode'] === 'replace') {
+            echo $result['id_from_csv'] ? 'replaced the old task list, ids taken from the CSV' : 'replaced the old task list, ids restart from 1';
+        } else {
+            echo $result['id_from_csv'] ? 'appended to the existing list, ids taken from the CSV' : 'appended to the existing list';
+        }
+     ?>).</p>
   <?php if ($result['skipped'] > 0): ?>
     <p class="small"><?=$result['skipped']?> row<?=$result['skipped']===1?'':'s'?> skipped because the Title cell was empty.</p>
   <?php endif; ?>

@@ -9,7 +9,7 @@ $team    = current_team();
 $team_id = current_team_id();
 $task_id = intval($_GET['id'] ?? 0);
 
-$st = db()->prepare('SELECT id, title, description, points, photos_required, videos_required FROM tasks WHERE id = ?');
+$st = db()->prepare('SELECT id, task_no, title, description, points, photos_required, videos_required, bonus FROM tasks WHERE id = ?');
 $st->execute([$task_id]);
 $task = $st->fetch();
 if (!$task) { header('Location: ' . BASE_URL . '/team.php'); exit; }
@@ -20,8 +20,26 @@ $sub = $ss->fetch();
 $status = $sub['status'] ?? 'not_started';
 $note   = $sub['note']   ?? '';
 
+// Starter-task unlock gate: a locked (non-starter) task can't be opened or
+// submitted until the team has cleared the gate. Enforced server-side here so
+// hiding the link on team.php isn't the only defense.
+$starter_ids = starter_task_ids(starter_gate_count());
+$task_locked = !in_array($task_id, $starter_ids, true)
+            && !starter_gate_open($team_id, $starter_ids);
+
+// Human task label for headings ("1a"/"3b"), falling back to the numeric id.
+$task_no_label = trim((string)($task['task_no'] ?? ''));
+if ($task_no_label === '') $task_no_label = (string)(int)$task['id'];
+
 $num_photos = (int)$task['photos_required'];
 $num_videos = (int)$task['videos_required'];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $task_locked) {
+    // Locked task: refuse the submission. The uploader XHR surfaces this text.
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('This task is locked. Submit your starting tasks first to unlock it.');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
     // Guard the host's hard POST cap. A body over the limit is silently
@@ -168,12 +186,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
 </head>
 <body class="container">
 
-<h1>Task #<?=(int)$task['id']?> – <?=htmlspecialchars($task['title'])?></h1>
+<h1>Task <?=htmlspecialchars($task_no_label)?><?= !empty($task['bonus']) ? ' 🎁' : '' ?> – <?=htmlspecialchars($task['title'])?></h1>
 <div class="card">
-  <p><strong>Points:</strong> <?=(int)$task['points']?></p>
+  <p><strong>Points:</strong> <?=(int)$task['points']?><?= !empty($task['bonus']) ? ' <span style="color:#6a3fb5; font-weight:600;">(Bonus challenge)</span>' : '' ?></p>
   <p><?=nl2br(htmlspecialchars($task['description'] ?? ''))?></p>
 
-  <?php if ($status === 'rejected' && $note): ?>
+  <?php if ($task_locked): ?>
+    <p class="alert error"><strong>🔒 Locked.</strong> Submit your starting tasks first — the rest of the quest unlocks once your team has submitted the first <?=starter_gate_count()?> task<?=starter_gate_count()===1?'':'s'?>.</p>
+  <?php elseif ($status === 'rejected' && $note): ?>
     <p class="alert error"><strong>Note:</strong> <?=htmlspecialchars($note)?></p>
   <?php elseif ($status === 'pending'): ?>
     <p class="alert"><em>This task is pending approval. You may resubmit if needed.</em></p>
@@ -181,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
     <p class="alert success"><em>This task has already been approved!</em></p>
   <?php endif; ?>
 
-  <?php if ($status !== 'approved'): ?>
+  <?php if ($status !== 'approved' && !$task_locked): ?>
   <form id="upload-form" method="post" enctype="multipart/form-data" class="grid-2">
     <?php for ($i = 0; $i < $num_photos; $i++): ?>
       <label>Photo <?=($i+1)?>: <input type="file" name="upload[]" accept="image/*" required></label>
