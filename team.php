@@ -81,7 +81,7 @@ if ($end && $now > $end) {
 
 // Tasks LEFT JOIN this team's submissions; one row per task with status/note (or 'not_started').
 $st = db()->prepare(
-    "SELECT tk.id, tk.task_no, tk.title, tk.points, tk.penalty, tk.mandatory, tk.bonus,
+    "SELECT tk.id, tk.task_no, tk.title, tk.points, tk.penalty, tk.mandatory, tk.bonus, tk.sort_order,
             COALESCE(s.status, 'not_started') AS status,
             s.note
        FROM tasks tk
@@ -91,14 +91,27 @@ $st = db()->prepare(
 $st->execute([$team_id]);
 $task_list = $st->fetchAll();
 foreach ($task_list as &$t) {
-    $t['id']        = (int)$t['id'];
-    $t['task_no']   = (string)($t['task_no'] ?? '');
-    $t['points']    = (int)$t['points'];
-    $t['penalty']   = (int)$t['penalty'];
-    $t['mandatory'] = (int)$t['mandatory'];
-    $t['bonus']     = (int)$t['bonus'];
+    $t['id']         = (int)$t['id'];
+    $t['task_no']    = (string)($t['task_no'] ?? '');
+    $t['points']     = (int)$t['points'];
+    $t['penalty']    = (int)$t['penalty'];
+    $t['mandatory']  = (int)$t['mandatory'];
+    $t['bonus']      = (int)$t['bonus'];
+    $t['sort_order'] = (int)$t['sort_order'];
 }
 unset($t);
+
+// Natural ordering key for a task number like "3b" → [0, 3, "b", sort_order],
+// so 1a < 1b < 2 < 10a (numeric part first, then the a/b suffix). Tasks with a
+// blank or non-numeric label sort after the numbered ones, by the admin's
+// sort order. Used as the in-group tiebreak below.
+$task_key = function (array $t): array {
+    $no = strtolower(trim((string)$t['task_no']));
+    if ($no !== '' && preg_match('/^(\d+)\s*([a-z]*)/', $no, $m)) {
+        return [0, (int)$m[1], $m[2], $t['sort_order']];
+    }
+    return [1, $t['sort_order'], $no, 0];
+};
 
 // Starter-task unlock gate. Until the team has submitted the first N tasks
 // (pending or approved), the remaining tasks are visible but locked.
@@ -115,16 +128,19 @@ $starter_todo = array_values(array_filter(
 // A task is locked when the gate is closed and it isn't one of the starters.
 $is_locked = fn(array $t): bool => !$gate_open && !isset($starter_set[$t['id']]);
 
-usort($task_list, function ($a, $b) use ($is_locked) {
+usort($task_list, function ($a, $b) use ($is_locked, $task_key) {
     // Locked tasks sink below everything the team can act on right now.
     $a_l = $is_locked($a) ? 1 : 0;
     $b_l = $is_locked($b) ? 1 : 0;
     if ($a_l !== $b_l) return $a_l <=> $b_l;
+    // Status groups: pending/rejected on top, not-started in the middle,
+    // approved at the bottom.
     $order = ['pending' => 1, 'rejected' => 2, 'not_started' => 3, 'approved' => 4];
     $a_o = $order[$a['status']] ?? 99;
     $b_o = $order[$b['status']] ?? 99;
     if ($a_o !== $b_o) return $a_o <=> $b_o;
-    return $b['points'] <=> $a['points'];
+    // Within a status group, natural task-number order keeps 3a next to 3b.
+    return $task_key($a) <=> $task_key($b);
 });
 
 // Derived scores for this team. Every task's penalty counts against the team
