@@ -69,7 +69,7 @@ if ($end && $now > $end) {
     <body class="container center">
       <div class="card center">
         <h2>The Ultimate Quest has ended!</h2>
-        <p>Thanks for playing — see you next time!</p>
+        <p>Thanks for playing. See you next time!</p>
         <p class="small">Your adventure doesn't end here… stay tuned for the next Quest!</p>
         <p class="center"><a href="<?=BASE_URL?>/logout.php">Log Out</a></p>
       </div>
@@ -232,7 +232,7 @@ function format_phone_display(string $raw): string {
   <?php endif; ?><br>
   <strong>Pending:</strong> <?=$pending?> pts</p>
   <?php if ($total_penalty > 0): ?>
-  <p class="small" style="margin:4px 0 0;">⚠️ Some tasks have negative points if they are not completed —
+  <p class="small" style="margin:4px 0 0;">⚠️ Some tasks have negative points if they are not completed;
     the amount in parentheses is being subtracted from your score until those tasks are done.</p>
   <?php endif; ?>
 <?php if ($priority_total > 0): ?>
@@ -255,7 +255,7 @@ function format_phone_display(string $raw): string {
       <?php if ($priority_done): ?>
         ✅ All priority tasks complete!
       <?php else: ?>
-        ⚠️ Skipping a priority task costs your team a steep point penalty — finish them first!
+        ⚠️ Skipping a priority task costs your team a steep point penalty. Finish them first!
       <?php endif; ?>
     </p>
   </div>
@@ -299,7 +299,7 @@ function format_phone_display(string $raw): string {
         <?php else: ?>
           the first <?=$gate_count?> task<?=$gate_count===1?'':'s'?>.
         <?php endif; ?>
-        (Submitting is enough — you don't have to wait for approval. A rejected starting task must be resubmitted.)
+        (Submitting is enough; you don't have to wait for approval. A rejected starting task must be resubmitted.)
       </p>
     </div>
   <?php endif; ?>

@@ -23,7 +23,7 @@ if (current_team()) { header('Location: ' . BASE_URL . '/team.php'); exit; }
   <form method="post" action="<?=BASE_URL?>/login.php" class="card">
     <h2>Team Login</h2>
     <?php if (($_GET['err'] ?? '') === 'locked'): ?>
-      <div class="alert error">Too many failed attempts — wait a minute, then try again.</div>
+      <div class="alert error">Too many failed attempts. Wait a minute, then try again.</div>
     <?php elseif (!empty($_GET['err'])): ?>
       <div class="alert error">Login failed. Check your team name and PIN, then try again.</div>
     <?php endif; ?>

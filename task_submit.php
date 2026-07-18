@@ -192,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
   <p><?=nl2br(htmlspecialchars($task['description'] ?? ''))?></p>
 
   <?php if ($task_locked): ?>
-    <p class="alert error"><strong>🔒 Locked.</strong> Submit your starting tasks first — the rest of the quest unlocks once your team has submitted the first <?=starter_gate_count()?> task<?=starter_gate_count()===1?'':'s'?>.</p>
+    <p class="alert error"><strong>🔒 Locked.</strong> Submit your starting tasks first. The rest of the quest unlocks once your team has submitted the first <?=starter_gate_count()?> task<?=starter_gate_count()===1?'':'s'?>.</p>
   <?php elseif ($status === 'rejected' && $note): ?>
     <p class="alert error"><strong>Note:</strong> <?=htmlspecialchars($note)?></p>
   <?php elseif ($status === 'pending'): ?>
@@ -276,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
     };
     xhr.upload.onload = () => {
       bar.removeAttribute('value');
-      status.textContent = 'Upload complete — saving on server…';
+      status.textContent = 'Upload complete, saving on server…';
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 400) {
