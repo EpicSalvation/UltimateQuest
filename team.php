@@ -161,6 +161,14 @@ $pending = (int)$score['pending'];
 $total_penalty       = (int)db()->query('SELECT COALESCE(SUM(penalty), 0) FROM tasks')->fetchColumn();
 $penalty_outstanding = $total_penalty - (int)$score['penalty_cleared'];
 
+// Late arrival back to homebase — derived from the minutes an admin recorded.
+$ls = db()->prepare('SELECT late_minutes, late_void, dq_void FROM teams WHERE id = ?');
+$ls->execute([$team_id]);
+$late           = $ls->fetch() ?: [];
+$late_minutes   = isset($late['late_minutes']) ? (int)$late['late_minutes'] : null;
+$late_deduction = late_deduction($late_minutes, !empty($late['late_void']));
+$is_dq          = late_disqualified($late_minutes, !empty($late['dq_void']));
+
 $total_tasks    = count($task_list);
 $approved_count = count(array_filter($task_list, fn($t) => $t['status'] === 'approved'));
 $pending_count  = count(array_filter($task_list, fn($t) => $t['status'] === 'pending'));
@@ -229,8 +237,18 @@ function format_phone_display(string $raw): string {
   </p>
   <p><strong>Score:</strong> <?=$awarded?> pts<?php if ($total_penalty > 0): ?>
     <span style="color:#c00; font-weight:600;">(−<?=$penalty_outstanding?>)</span>
+  <?php endif; ?><?php if ($late_deduction > 0): ?>
+    <span style="color:#c00; font-weight:600;">(−<?=$late_deduction?> late)</span>
   <?php endif; ?><br>
   <strong>Pending:</strong> <?=$pending?> pts</p>
+  <?php if ($late_deduction > 0 || $is_dq): ?>
+  <p class="small" style="margin:4px 0 0; color:#c00;">
+    ⏰ Your team was logged back at homebase <strong><?=$late_minutes?> minute<?=$late_minutes === 1 ? '' : 's'?></strong> late.
+    <?php if ($late_deduction > 0): ?><?=$late_deduction?> points have been deducted.<?php endif; ?>
+    <?php if ($is_dq): ?><strong>Your team is currently disqualified.</strong><?php endif; ?>
+    Talk to an event leader if you think this is wrong.
+  </p>
+  <?php endif; ?>
   <?php if ($total_penalty > 0): ?>
   <p class="small" style="margin:4px 0 0;">⚠️ Some tasks have negative points if they are not completed;
     the amount in parentheses is being subtracted from your score until those tasks are done.</p>

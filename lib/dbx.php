@@ -59,6 +59,21 @@ function ensure_schema_upgrades(PDO $pdo): void {
             }
             $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','5') ON DUPLICATE KEY UPDATE v=VALUES(v)");
         }
+        if ($v < 6) {
+            // Late-arrival penalty: minutes late are recorded, the point
+            // deduction and disqualification are derived from them.
+            $adds = [
+                'late_minutes'    => "ALTER TABLE teams ADD COLUMN late_minutes INT UNSIGNED NULL DEFAULT NULL AFTER pin_hash",
+                'late_void'       => "ALTER TABLE teams ADD COLUMN late_void TINYINT(1) NOT NULL DEFAULT 0 AFTER late_minutes",
+                'dq_void'         => "ALTER TABLE teams ADD COLUMN dq_void TINYINT(1) NOT NULL DEFAULT 0 AFTER late_void",
+                'late_note'       => "ALTER TABLE teams ADD COLUMN late_note VARCHAR(255) NULL AFTER dq_void",
+                'late_updated_at' => "ALTER TABLE teams ADD COLUMN late_updated_at TIMESTAMP NULL AFTER late_note",
+            ];
+            foreach ($adds as $col => $sql) {
+                if (!$pdo->query("SHOW COLUMNS FROM teams LIKE '$col'")->fetch()) $pdo->exec($sql);
+            }
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','6') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
     } catch (Throwable $e) {
         // Non-fatal: app continues; admin can re-run migrate.php if needed.
     }
@@ -76,6 +91,70 @@ function set_setting(string $k, ?string $v): void {
         'INSERT INTO settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)'
     );
     $st->execute([$k, $v]);
+}
+
+// ── Late-arrival penalty ──────────────────────────────────────────────────
+// Teams that get back to homebase after the deadline are docked. The tariff:
+//   1–5 minutes late  → 5 points per minute (max 25)
+//   6–10 minutes late → flat 75 points
+//   over 10 minutes   → flat 75 points AND disqualification
+// Only `teams.late_minutes` is stored; the deduction and the DQ are derived
+// from it, so fixing the minutes re-scores the team with no other edits.
+//
+// Teams may challenge. `late_void` drops the point deduction, `dq_void` drops
+// the disqualification; they are independent, so a challenge can succeed on
+// the DQ while the points stand. Nothing is deleted — clearing a void puts
+// the original ruling straight back.
+
+const LATE_RATE_PER_MIN  = 5;   // points per minute inside the graduated band
+const LATE_GRADUATED_MAX = 5;   // last minute still charged per-minute
+const LATE_FLAT_PENALTY  = 75;  // flat charge past the graduated band
+const LATE_DQ_MINUTES    = 10;  // strictly more than this = disqualified
+
+/** Points to dock a team that arrived $minutes late. */
+function late_deduction(?int $minutes, bool $void = false): int {
+    if ($void || $minutes === null || $minutes <= 0) return 0;
+    return $minutes <= LATE_GRADUATED_MAX
+        ? $minutes * LATE_RATE_PER_MIN
+        : LATE_FLAT_PENALTY;
+}
+
+/** True when $minutes late earns a disqualification (and it wasn't voided). */
+function late_disqualified(?int $minutes, bool $void = false): bool {
+    return !$void && $minutes !== null && $minutes > LATE_DQ_MINUTES;
+}
+
+/** Plain-language summary of the ruling, for admin UI and team-facing notices. */
+function late_ruling_text(?int $minutes, bool $late_void = false, bool $dq_void = false): string {
+    if ($minutes === null || $minutes <= 0) return 'On time';
+    $m    = $minutes . ' min late';
+    $bits = [];
+    $ded  = late_deduction($minutes, $late_void);
+    if ($ded > 0)                       $bits[] = "−$ded pts";
+    elseif (late_deduction($minutes) > 0) $bits[] = 'points challenge upheld';
+    if (late_disqualified($minutes, $dq_void))   $bits[] = 'DISQUALIFIED';
+    elseif (late_disqualified($minutes))         $bits[] = 'DQ challenge upheld';
+    return $m . ' (' . implode(', ', $bits) . ')';
+}
+
+// SQL mirrors of the two rules above, for queries that have to sort by the
+// final score. $t is the alias of the `teams` table in the query.
+// Keep these in step with late_deduction()/late_disqualified().
+
+function sql_late_deduction(string $t = 't'): string {
+    return "(CASE WHEN $t.late_void = 1 OR $t.late_minutes IS NULL OR $t.late_minutes <= 0 THEN 0
+                  WHEN $t.late_minutes <= " . LATE_GRADUATED_MAX . " THEN $t.late_minutes * " . LATE_RATE_PER_MIN . "
+                  ELSE " . LATE_FLAT_PENALTY . " END)";
+}
+
+function sql_late_dq(string $t = 't'): string {
+    return "(CASE WHEN $t.dq_void = 1 OR $t.late_minutes IS NULL THEN 0
+                  WHEN $t.late_minutes > " . LATE_DQ_MINUTES . " THEN 1 ELSE 0 END)";
+}
+
+/** Columns every score query needs from `teams` in its GROUP BY. */
+function sql_late_group_by(string $t = 't'): string {
+    return "$t.late_minutes, $t.late_void, $t.dq_void";
 }
 
 // ── Starter-task gate ─────────────────────────────────────────────────────

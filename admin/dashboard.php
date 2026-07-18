@@ -275,6 +275,33 @@ if ($end_str) {
   </div>
 </div>
 
+<div id="lateModal" class="modal hidden">
+  <div class="modal-content">
+    <span class="close close-late">&times;</span>
+    <h3>Late arrival — <span id="late-team-label"></span></h3>
+    <input type="hidden" id="late-team">
+    <p class="small">5 pts per minute for the first 5 minutes, a flat 75 past that,
+       and disqualification over 10 minutes. Leave blank (or 0) if the team was on time.</p>
+    <label>Minutes late:
+      <input type="number" id="late-minutes" min="0" max="999" step="1" style="max-width:8em;">
+    </label>
+    <div id="late-preview" class="small" style="margin:8px 0; padding:8px; border-radius:6px; background:rgba(128,128,128,.12);"></div>
+    <p class="small" style="margin-bottom:2px;"><strong>Challenge rulings</strong> (tick to reverse; untick to reinstate):</p>
+    <label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="late-void"> Void the point deduction
+    </label>
+    <label style="display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="late-dq-void"> Void the disqualification
+    </label>
+    <label>Note (why):
+      <input type="text" id="late-note" maxlength="255" placeholder="e.g. traffic detour confirmed by driver">
+    </label>
+    <div class="center" style="margin-top:1em;">
+      <button type="button" id="late-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <div id="editTaskModal" class="modal hidden">
   <div class="modal-content">
     <span class="close-edit">&times;</span>
@@ -444,33 +471,127 @@ async function loadTeams() {
   const j = await r.json();
   if (!j.success) { teamsTable.textContent = j.error || 'Error loading teams'; return; }
   if (!j.teams || j.teams.length === 0) { teamsTable.textContent = 'No teams found.'; return; }
-  let html = '<table style="width:100%; border-collapse:collapse;">' +
+  lastTeams = j.teams;
+  // Scroll container: the extra "Late" column can push this table past a
+  // narrow admin screen, and the card must not overflow.
+  let html = '<div style="overflow-x:auto;">' +
+             '<table style="width:100%; border-collapse:collapse;">' +
              '<tr>' +
              '<th style="text-align:left; padding:6px;">Team Name</th>' +
              '<th style="text-align:center; padding:6px;">Awarded</th>' +
              '<th style="text-align:center; padding:6px;">Pending</th>' +
              '<th style="text-align:center; padding:6px;">Penalties</th>' +
+             '<th style="text-align:center; padding:6px;">Late</th>' +
              '<th style="text-align:center; padding:6px;">Net Score</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
   for (const team of j.teams) {
-    html += `<tr>
+    // "Late" cell: the deduction, or a struck-through one when a challenge
+    // voided it, plus a DQ marker (also struck through when the DQ is voided).
+    let late = '—';
+    if (team.late_minutes) {
+      const ded = team.late_void
+        ? `<s>−${LATE_TARIFF(team.late_minutes)}</s>`
+        : `−${team.late_deduction}`;
+      const dq = team.late_minutes > LATE_DQ_MINUTES
+        ? (team.dq_void ? ' <s>DQ</s>' : ' <strong style="color:#c00;">DQ</strong>')
+        : '';
+      late = `<span style="white-space:nowrap;" title="${esc(team.late_note)}">${team.late_minutes}m ${ded}${dq}</span>`;
+    }
+    html += `<tr style="border-bottom:1px solid rgba(0,0,0,0.1);${team.disqualified ? ' opacity:.6;' : ''}">
       <td style="padding:6px;">${esc(team.name)}</td>
       <td style="padding:6px; text-align:center;">${team.score_awarded}</td>
       <td style="padding:6px; text-align:center;">${team.score_pending}</td>
       <td style="padding:6px; text-align:center;">${team.penalty_outstanding > 0 ? '−' + team.penalty_outstanding : '0'}</td>
-      <td style="padding:6px; text-align:center;"><strong>${team.score_net}</strong></td>
-      <td style="padding:6px; text-align:center;">
-        <form method="post" style="display:inline" onsubmit="return confirm('Delete team ' + this.delete_team.value + '?');">
+      <td style="padding:6px; text-align:center;">${late}</td>
+      <td style="padding:6px; text-align:center;"><strong>${team.score_net}</strong>${
+        team.disqualified ? `<br><span class="small" style="color:#c00;">was ${team.score_before_dq}</span>` : ''}</td>
+      <td style="padding:6px; text-align:center; display:flex; flex-direction:column; gap:6px;">
+        <button type="button" class="secondary late-btn" data-team="${esc(team.name)}" style="width:100%;">⏰ Late</button>
+        <form method="post" style="margin:0;" onsubmit="return confirm('Delete team ' + this.delete_team.value + '?');">
           <input type="hidden" name="_csrf" value="${esc(CSRF)}">
           <input type="hidden" name="delete_team" value="${esc(team.name)}">
-          <button type="submit" class="secondary">Delete</button>
+          <button type="submit" class="secondary" style="width:100%;">Delete</button>
         </form>
       </td>
     </tr>`;
   }
-  html += '</table>';
+  html += '</table></div>';
   teamsTable.innerHTML = html;
+}
+
+// ── Late-arrival penalty ──────────────────────────────────────────────────
+// Mirrors late_deduction() in lib/dbx.php: 5 pts/min for the first 5 minutes,
+// then a flat 75, and past 10 minutes a disqualification on top. Only used to
+// preview the ruling — the server recomputes it from the minutes on save.
+const LATE_RATE_PER_MIN = 5, LATE_GRADUATED_MAX = 5, LATE_FLAT_PENALTY = 75, LATE_DQ_MINUTES = 10;
+function LATE_TARIFF(min) {
+  if (!min || min <= 0) return 0;
+  return min <= LATE_GRADUATED_MAX ? min * LATE_RATE_PER_MIN : LATE_FLAT_PENALTY;
+}
+
+let lastTeams = [];
+const lateModal = document.getElementById('lateModal');
+
+function openLate(name) {
+  const team = lastTeams.find(t => t.name === name);
+  if (!team) return;
+  document.getElementById('late-team').value      = name;
+  document.getElementById('late-team-label').textContent = name.replace(/_/g, ' ');
+  document.getElementById('late-minutes').value   = team.late_minutes ?? '';
+  document.getElementById('late-void').checked    = team.late_void;
+  document.getElementById('late-dq-void').checked = team.dq_void;
+  document.getElementById('late-note').value      = team.late_note || '';
+  previewLate();
+  lateModal.classList.remove('hidden');
+}
+function closeLate() { lateModal.classList.add('hidden'); }
+document.querySelector('.close-late').onclick = closeLate;
+lateModal.onclick = e => { if (e.target === lateModal) closeLate(); };
+document.getElementById('late-save').onclick = saveLate;
+for (const id of ['late-minutes', 'late-void', 'late-dq-void']) {
+  document.getElementById(id).addEventListener('input', previewLate);
+}
+// Delegated: the teams table is re-rendered by the 15s poll.
+teamsTable.addEventListener('click', e => {
+  const btn = e.target.closest('.late-btn');
+  if (btn) openLate(btn.dataset.team);
+});
+
+// Live preview of what saving would do, so the ruling is never a surprise.
+function previewLate() {
+  const min    = parseInt(document.getElementById('late-minutes').value, 10) || 0;
+  const pVoid  = document.getElementById('late-void').checked;
+  const dqVoid = document.getElementById('late-dq-void').checked;
+  const out    = document.getElementById('late-preview');
+  if (min <= 0) { out.innerHTML = '<strong>On time</strong> — no deduction.'; return; }
+  const base = LATE_TARIFF(min);
+  const band = min <= LATE_GRADUATED_MAX
+    ? `${min} × ${LATE_RATE_PER_MIN} pts/min`
+    : `flat ${LATE_FLAT_PENALTY} pts (over ${LATE_GRADUATED_MAX} min)`;
+  let out_html = pVoid
+    ? `<s>−${base} pts</s> → <strong>0 pts deducted</strong> (challenge upheld)`
+    : `<strong>−${base} pts</strong> <span class="small">(${band})</span>`;
+  if (min > LATE_DQ_MINUTES) {
+    out_html += dqVoid
+      ? '<br><s>DISQUALIFIED</s> → <strong>not disqualified</strong> (challenge upheld)'
+      : `<br><strong style="color:#c00;">DISQUALIFIED</strong> <span class="small">(over ${LATE_DQ_MINUTES} min — scores 0)</span>`;
+  }
+  out.innerHTML = out_html;
+}
+
+async function saveLate() {
+  const j = await jsonPost(`${BASE}/api/set_late.php`, {
+    team:      document.getElementById('late-team').value,
+    minutes:   document.getElementById('late-minutes').value,
+    late_void: document.getElementById('late-void').checked,
+    dq_void:   document.getElementById('late-dq-void').checked,
+    note:      document.getElementById('late-note').value,
+  });
+  if (!j.success) { toast(j.message || 'Could not save', true); return; }
+  closeLate();
+  toast(j.ruling);
+  loadTeams();
 }
 
 let lastTasks = []; // cached from loadTasks so the edit modal opens instantly

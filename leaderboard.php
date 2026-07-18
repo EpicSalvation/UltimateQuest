@@ -14,17 +14,24 @@ if (!$isAdmin && setting('reveal_leaderboard') !== '1') {
 
 // Net score: approved points minus the penalty of every task the team has
 // not (yet) completed — i.e. SUM(approved: points + penalty) - SUM(all penalties).
+// …minus the late-arrival deduction. Disqualified teams score 0 and sort last.
+$late_ded = sql_late_deduction('t');
+$late_dq  = sql_late_dq('t');
+
 $rows = db()->query(
-    "SELECT t.name,
+    "SELECT t.name, t.late_minutes,
+            $late_ded AS late_deduction,
+            $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
-              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks) AS score,
+              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks)
+              - $late_ded AS score,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END), 0) AS pending,
             MAX(s.reviewed_at) AS last_reviewed
        FROM teams t
        LEFT JOIN submissions s ON s.team_id = t.id
        LEFT JOIN tasks tk      ON tk.id    = s.task_id
-       GROUP BY t.id, t.name
-       ORDER BY score DESC, t.name"
+       GROUP BY t.id, t.name, " . sql_late_group_by('t') . "
+       ORDER BY disqualified ASC, score DESC, t.name"
 )->fetchAll();
 ?>
 <!doctype html>
@@ -42,11 +49,16 @@ $rows = db()->query(
     <p class="small">No teams registered yet.</p>
   <?php else: ?>
     <?php foreach ($rows as $r): ?>
-      <div class="row">
-        <div class="name"><strong><?=htmlspecialchars(str_replace('_',' ',$r['name']))?></strong></div>
-        <div class="score"><?=(int)$r['score']?> pts</div>
+      <?php $dq = (int)$r['disqualified'] === 1; ?>
+      <div class="row"<?= $dq ? ' style="opacity:.65;"' : '' ?>>
+        <div class="name"><strong><?=htmlspecialchars(str_replace('_',' ',$r['name']))?></strong>
+          <?php if ($dq): ?><span class="small" style="color:#c00; font-weight:700;"> DISQUALIFIED</span><?php endif; ?>
+        </div>
+        <div class="score"><?= $dq ? '0' : (int)$r['score'] ?> pts</div>
         <div class="time small">
-          <?php if ((int)$r['pending'] > 0): ?>
+          <?php if ((int)$r['late_deduction'] > 0): ?>
+            ⏰ −<?=(int)$r['late_deduction']?> late
+          <?php elseif ((int)$r['pending'] > 0): ?>
             🕓 <?=(int)$r['pending']?> pts pending
           <?php else: ?>
             &nbsp;

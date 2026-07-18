@@ -18,13 +18,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 State lives in MySQL (InnoDB, utf8mb4). Schema is in `lib/schema.sql` and gets applied by `migrate.php`. Tables:
 
-- `teams(id, name UNIQUE, display_name, pin_hash, created_at)` — `name` is the lowercased-underscored slug; `display_name` is what users see; `pin_hash` is `password_hash`'d.
+- `teams(id, name UNIQUE, display_name, pin_hash, late_minutes, late_void, dq_void, late_note, late_updated_at, created_at)` — `name` is the lowercased-underscored slug; `display_name` is what users see; `pin_hash` is `password_hash`'d.
 - `tasks(id, task_no, title, description, points, penalty, photos_required, videos_required, mandatory, bonus, sort_order, created_at)` — `penalty` is the points deducted when a team does NOT complete the task; it is **always stored positive** (inputs like `-25` are normalized) and the scoring queries subtract it. `mandatory` is the "Priority ⭐" flag: it only drives highlighting/labeling in the UI — there is no qualification rule attached to it (admins express the stakes via `penalty`). `task_no` (VARCHAR, nullable) is the **human-facing task label** shown to teams (e.g. `1a` main / `1b` bonus), kept separate from the auto-increment `id`; display only, falls back to `#id` when blank. `bonus` is the "Bonus 🎁" flag — a second UI highlight (violet) alongside Priority (amber); it too is display-only (a bonus task is just a normal points-bearing task).
 - `submissions(id, team_id FK CASCADE, task_id FK CASCADE, status ENUM('pending','approved','rejected'), note, submitted_at, reviewed_at)` with `UNIQUE(team_id, task_id)` and `KEY(status, submitted_at)`. One row per team/task — resubmission updates the existing row.
 - `submission_files(id, submission_id FK CASCADE, filename, mime_type, byte_size, has_thumb, slideshow, created_at)` — `slideshow` is the admin-curated "use in end-of-event slideshow" flag (schema v4).
 - `settings(k VARCHAR(64) PK, v TEXT)` — holds `event_start_time`, `event_end_time`, `reveal_leaderboard`, `admin_password_hash`, `starter_gate_count`, `db_schema_v`. Read with `setting($k, $default)`, write with `set_setting($k, $v)` (both in `lib/dbx.php`).
 
 **Starter-task unlock gate.** `starter_gate_count` (default `0` = off) makes the first N tasks in list order (`ORDER BY sort_order, id`) *gate* the rest: a team must have an active submission (status `pending` OR `approved`) for all N before any other task opens. A rejected or not-yet-started starter leaves the gate closed. Helpers live in `lib/dbx.php`: `starter_gate_count()`, `starter_task_ids($n)`, `starter_gate_open($team_id, $starter_ids=null)`. The gate is **enforced server-side in `task_submit.php`** (locked tasks 403 on POST and hide the upload form), not just by hiding the "Open" link on `team.php`. Scoring is unaffected — the gate only controls submittability.
+
+**Late arrival back to homebase.** `teams.late_minutes` (nullable) is the only stored fact; the deduction and the disqualification are derived from it (schema v6). Tariff, in `lib/dbx.php`: 1–5 min → `LATE_RATE_PER_MIN` (5) per minute; over 5 min → flat `LATE_FLAT_PENALTY` (75); over `LATE_DQ_MINUTES` (10) → that same flat 75 **plus** disqualification. A disqualified team's score displays as `0` and sorts last; `score_before_dq` carries the pre-DQ number for admins judging a challenge.
+
+Teams can challenge a ruling, so it is reversible: `late_void` drops the point deduction, `dq_void` drops the disqualification, and the two are **independent** — a challenge can succeed on the DQ while the points stand. Nothing is deleted; clearing a void reinstates the original ruling. Admins set all of this from the Teams table on the dashboard (⏰ Late button → modal with a live preview) via `api/set_late.php`. `api/end_game.php` clears the rulings from any teams that survive into the next game.
+
+The rule is implemented three times — `late_deduction()`/`late_disqualified()` in PHP, `sql_late_deduction()`/`sql_late_dq()` for queries that must sort by final score, and a `LATE_TARIFF()` preview mirror in `admin/dashboard.php`. **Change all three together.** Every score query must also carry `sql_late_group_by()` in its GROUP BY.
 
 **Scores are derived, never stored.** The old `score_awarded`/`score_pending` columns are gone. Every page that needs a score computes it inline. A task's `penalty` counts against a team until that task is approved, so the net score is:
 
@@ -34,6 +40,8 @@ COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 EN
 SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END) AS awarded  -- raw approved points
 SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END) AS pending
 ```
+
+…then subtract the late-arrival deduction (`sql_late_deduction('t')`) from the net, and force the net to `0` when `sql_late_dq('t')` is 1.
 
 (Approving a task both awards its points and clears its penalty, hence `points + penalty` minus the constant all-tasks penalty total.) Net score can be negative. If you find yourself caching a score, stop — the join is cheap and drift is the bug we deliberately removed.
 

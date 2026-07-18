@@ -38,10 +38,19 @@ $pdo = db();
 
 // score is the net result: approved points minus the penalty of every task the
 // team did not complete (SUM(approved: points + penalty) - SUM(all penalties)).
+// The late-arrival deduction comes off that net; disqualified teams score 0
+// and sort last. The minutes and challenge voids are archived alongside so the
+// final standings can be re-derived from the dump.
+$late_ded = sql_late_deduction('t');
+$late_dq  = sql_late_dq('t');
+
 $leaderboard = $pdo->query(
-    "SELECT t.id, t.name, t.display_name,
+    "SELECT t.id, t.name, t.display_name, t.late_minutes, t.late_void, t.dq_void, t.late_note,
+            $late_ded AS late_deduction,
+            $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
-              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks) AS score,
+              - (SELECT COALESCE(SUM(penalty), 0) FROM tasks)
+              - $late_ded AS score,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS points_awarded,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN 1 ELSE 0 END), 0) AS approved,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN 1 ELSE 0 END), 0) AS pending,
@@ -49,9 +58,17 @@ $leaderboard = $pdo->query(
        FROM teams t
        LEFT JOIN submissions s ON s.team_id = t.id
        LEFT JOIN tasks tk      ON tk.id    = s.task_id
-       GROUP BY t.id, t.name, t.display_name
-       ORDER BY score DESC, t.name"
+       GROUP BY t.id, t.name, t.display_name, t.late_note, " . sql_late_group_by('t') . "
+       ORDER BY disqualified ASC, score DESC, t.name"
 )->fetchAll();
+
+// A disqualified team's final score is 0 — apply it once, here, so the results
+// HTML, the summary and the JSON dump all agree.
+foreach ($leaderboard as &$lb) {
+    $lb['score_before_dq'] = (int)$lb['score'];
+    if ((int)$lb['disqualified'] === 1) $lb['score'] = 0;
+}
+unset($lb);
 
 $per_task = $pdo->query(
     "SELECT tk.id, tk.title, tk.points, tk.penalty,
@@ -74,7 +91,7 @@ $file_stats = $pdo->query(
     "SELECT COUNT(*) AS n, COALESCE(SUM(byte_size), 0) AS bytes FROM submission_files"
 )->fetch();
 
-$teams_dump          = $pdo->query("SELECT id, name, display_name, created_at FROM teams ORDER BY id")->fetchAll();
+$teams_dump          = $pdo->query("SELECT id, name, display_name, late_minutes, late_void, dq_void, late_note, late_updated_at, created_at FROM teams ORDER BY id")->fetchAll();
 $tasks_dump          = $pdo->query("SELECT id, title, description, points, penalty, photos_required, videos_required, mandatory, sort_order, created_at FROM tasks ORDER BY sort_order, id")->fetchAll();
 $submissions_dump    = $pdo->query("SELECT id, team_id, task_id, status, note, submitted_at, reviewed_at FROM submissions ORDER BY id")->fetchAll();
 $submission_files_dp = $pdo->query("SELECT id, submission_id, filename, mime_type, byte_size, has_thumb, created_at FROM submission_files ORDER BY id")->fetchAll();
@@ -134,10 +151,17 @@ $html .= "<h1>The Ultimate Quest — Game " . htmlspecialchars($label) . "</h1>"
 $html .= "<p class='muted'>Ended " . htmlspecialchars($results['ended_at']) . " ET. ";
 $html .= "Submissions: {$counts_by_status['approved']} approved · {$counts_by_status['rejected']} rejected · {$counts_by_status['pending']} pending. ";
 $html .= "{$results['files_count']} files / " . number_format($results['files_bytes']) . " bytes.</p>";
-$html .= "<h2>Leaderboard</h2><table><tr><th>Rank</th><th>Team</th><th>Score</th><th>Approved</th><th>Rejected</th></tr>";
+$html .= "<h2>Leaderboard</h2><table><tr><th>Rank</th><th>Team</th><th>Score</th><th>Late</th><th>Approved</th><th>Rejected</th></tr>";
 foreach ($leaderboard as $i => $r) {
-    $html .= '<tr><td>' . ($i + 1) . '</td><td>' . htmlspecialchars($r['display_name'] ?: $r['name'])
-          . '</td><td>' . (int)$r['score'] . '</td><td>' . (int)$r['approved'] . '</td><td>' . (int)$r['rejected'] . '</td></tr>';
+    $dq   = (int)$r['disqualified'] === 1;
+    $late = late_ruling_text(
+        $r['late_minutes'] === null ? null : (int)$r['late_minutes'],
+        (bool)$r['late_void'], (bool)$r['dq_void']
+    );
+    $html .= '<tr><td>' . ($dq ? '—' : $i + 1) . '</td><td>' . htmlspecialchars($r['display_name'] ?: $r['name'])
+          . ($dq ? ' <strong>(DISQUALIFIED)</strong>' : '')
+          . '</td><td>' . (int)$r['score'] . '</td><td>' . htmlspecialchars($late)
+          . '</td><td>' . (int)$r['approved'] . '</td><td>' . (int)$r['rejected'] . '</td></tr>';
 }
 $html .= "</table><h2>Per-task</h2><table><tr><th>Task</th><th>Points</th><th>Penalty</th><th>Approved</th><th>Rejected</th></tr>";
 foreach ($per_task as $r) {
@@ -165,6 +189,10 @@ try {
     $pdo->exec('DELETE FROM submission_files');
     $pdo->exec('DELETE FROM submissions');
     if ($delete_teams) $pdo->exec('DELETE FROM teams');
+    // Late-arrival rulings belong to the game that just ended — clear them off
+    // any teams that survive into the next one.
+    else $pdo->exec('UPDATE teams SET late_minutes = NULL, late_void = 0, dq_void = 0,
+                                      late_note = NULL, late_updated_at = NULL');
     if ($delete_tasks) $pdo->exec('DELETE FROM tasks');
     if ($reset_event_times) {
         set_setting('event_start_time',   null);

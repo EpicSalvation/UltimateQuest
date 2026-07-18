@@ -90,22 +90,29 @@ foreach ($status_counts as $row) $status_map[$row['status']] = (int)$row['c'];
 // ----- Game metrics -----
 // Net score = SUM(approved: points + penalty) - SUM(all task penalties):
 // every task's penalty counts against a team until that task is approved.
+// The late-arrival deduction comes off that net; a disqualified team scores 0.
+$late_ded = sql_late_deduction('t');
+$late_dq  = sql_late_dq('t');
+
 $per_team = $pdo->query(
-    "SELECT t.name,
+    "SELECT t.name, t.late_minutes, t.late_void, t.dq_void,
             SUM(s.status='approved') AS approved,
             SUM(s.status='pending')  AS pending,
             SUM(s.status='rejected') AS rejected,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END),0) AS awarded,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END),0) AS pending_pts,
+            $late_ded AS late_deduction,
+            $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END),0)
-              - (SELECT COALESCE(SUM(penalty),0) FROM tasks) AS net,
+              - (SELECT COALESCE(SUM(penalty),0) FROM tasks)
+              - $late_ded AS net,
             GREATEST(COALESCE(MAX(s.submitted_at),'1970-01-01'),
                      COALESCE(MAX(s.reviewed_at), '1970-01-01')) AS last_activity
        FROM teams t
        LEFT JOIN submissions s ON s.team_id = t.id
        LEFT JOIN tasks tk      ON tk.id    = s.task_id
-       GROUP BY t.id, t.name
-       ORDER BY net DESC, t.name"
+       GROUP BY t.id, t.name, " . sql_late_group_by('t') . "
+       ORDER BY disqualified ASC, net DESC, t.name"
 )->fetchAll();
 
 $per_task = $pdo->query(
@@ -289,17 +296,22 @@ if (is_file($err_log)) {
     <table class="status">
       <tr><th>Team</th>
           <th class="num">✅</th><th class="num">🕓</th><th class="num">❌</th>
-          <th class="num">Awarded</th><th class="num">Pending pts</th><th class="num">Net score</th>
+          <th class="num">Awarded</th><th class="num">Pending pts</th>
+          <th>Late</th><th class="num">Net score</th>
           <th>Last activity</th></tr>
       <?php foreach ($per_team as $r): ?>
+        <?php $dq = (int)$r['disqualified'] === 1; ?>
         <tr>
-          <td><?=htmlspecialchars($r['name'])?></td>
+          <td><?=htmlspecialchars($r['name'])?><?= $dq ? ' <strong style="color:#c00;">DQ</strong>' : '' ?></td>
           <td class="num"><?=(int)$r['approved']?></td>
           <td class="num"><?=(int)$r['pending']?></td>
           <td class="num"><?=(int)$r['rejected']?></td>
           <td class="num"><?=(int)$r['awarded']?></td>
           <td class="num"><?=(int)$r['pending_pts']?></td>
-          <td class="num"><strong><?=(int)$r['net']?></strong></td>
+          <td class="small"><?=htmlspecialchars(late_ruling_text(
+                $r['late_minutes'] === null ? null : (int)$r['late_minutes'],
+                (bool)$r['late_void'], (bool)$r['dq_void']))?></td>
+          <td class="num"><strong><?= $dq ? 0 : (int)$r['net'] ?></strong></td>
           <td><?=$r['last_activity'] && substr($r['last_activity'],0,4)!=='1970' ? htmlspecialchars($r['last_activity']) : '—'?></td>
         </tr>
       <?php endforeach; ?>

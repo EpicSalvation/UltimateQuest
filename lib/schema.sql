@@ -9,6 +9,17 @@ CREATE TABLE IF NOT EXISTS teams (
   name         VARCHAR(64)  NOT NULL,
   display_name VARCHAR(128) NOT NULL,
   pin_hash     VARCHAR(255) NOT NULL,
+  -- Late arrival back to homebase. NULL = not recorded / arrived on time.
+  -- The deduction and the DQ are derived from this (see late_deduction() in
+  -- lib/dbx.php), never stored, so a correction to the minutes re-scores the
+  -- team automatically.
+  late_minutes    INT UNSIGNED NULL DEFAULT NULL,
+  -- Challenge outcomes. Each void is independent: an upheld challenge can
+  -- drop the point deduction, the disqualification, or both.
+  late_void       TINYINT(1) NOT NULL DEFAULT 0,
+  dq_void         TINYINT(1) NOT NULL DEFAULT 0,
+  late_note       VARCHAR(255) NULL,
+  late_updated_at TIMESTAMP NULL,
   created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uniq_team_name (name)
