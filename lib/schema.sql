@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS past_games (
   UNIQUE KEY uniq_label (label)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Ad-hoc point deductions for reported infractions (rule-breaking, unsporting
+-- conduct, etc.). A log, not a column: several can be recorded per team and
+-- each is individually reversible. `points` is stored positive; scoring
+-- subtracts SUM(points).
+CREATE TABLE IF NOT EXISTS infractions (
+  id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  team_id    INT UNSIGNED NOT NULL,
+  points     INT UNSIGNED NOT NULL DEFAULT 0,
+  reason     VARCHAR(255) NULL,
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_team (team_id),
+  CONSTRAINT fk_infractions_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS login_attempts (
   bucket       VARCHAR(80)  NOT NULL,
   attempts     INT UNSIGNED NOT NULL DEFAULT 0,

@@ -302,6 +302,28 @@ if ($end_str) {
   </div>
 </div>
 
+<div id="infractionModal" class="modal hidden">
+  <div class="modal-content">
+    <span class="close close-infraction">&times;</span>
+    <h3>Penalty points &mdash; <span id="infraction-team-label"></span></h3>
+    <input type="hidden" id="infraction-team">
+    <p class="small">Deduct points for a reported infraction. Each entry is recorded
+       separately and can be undone below, so add one per report.</p>
+    <label>Points to deduct:
+      <input type="number" id="infraction-points" min="1" max="9999" step="1" style="max-width:8em;">
+    </label>
+    <label>Reason (shown to the team):
+      <input type="text" id="infraction-reason" maxlength="255" placeholder="e.g. left the group without a leader">
+    </label>
+    <div class="center" style="margin-top:1em;">
+      <button type="button" id="infraction-save">Add deduction</button>
+    </div>
+    <hr style="margin:1em 0; opacity:.3;">
+    <p class="small" style="margin-bottom:4px;"><strong>Recorded so far:</strong></p>
+    <div id="infraction-list" class="small"></div>
+  </div>
+</div>
+
 <div id="editTaskModal" class="modal hidden">
   <div class="modal-content">
     <span class="close-edit">&times;</span>
@@ -482,6 +504,7 @@ async function loadTeams() {
              '<th style="text-align:center; padding:6px;">Pending</th>' +
              '<th style="text-align:center; padding:6px;">Penalties</th>' +
              '<th style="text-align:center; padding:6px;">Late</th>' +
+             '<th style="text-align:center; padding:6px;">Infractions</th>' +
              '<th style="text-align:center; padding:6px;">Net Score</th>' +
              '<th style="text-align:center; padding:6px;">Actions</th>' +
              '</tr>';
@@ -504,10 +527,15 @@ async function loadTeams() {
       <td style="padding:6px; text-align:center;">${team.score_pending}</td>
       <td style="padding:6px; text-align:center;">${team.penalty_outstanding > 0 ? '−' + team.penalty_outstanding : '0'}</td>
       <td style="padding:6px; text-align:center;">${late}</td>
+      <td style="padding:6px; text-align:center;">${
+        team.infraction_deduction > 0
+          ? `<span style="color:#c00; font-weight:600;">−${team.infraction_deduction}</span>`
+          : '—'}</td>
       <td style="padding:6px; text-align:center;"><strong>${team.score_net}</strong>${
         team.disqualified ? `<br><span class="small" style="color:#c00;">was ${team.score_before_dq}</span>` : ''}</td>
       <td style="padding:6px; text-align:center; display:flex; flex-direction:column; gap:6px;">
         <button type="button" class="secondary late-btn" data-team="${esc(team.name)}" style="width:100%;">⏰ Late</button>
+        <button type="button" class="secondary infraction-btn" data-team="${esc(team.name)}" style="width:100%;">⚠️ Penalty</button>
         <form method="post" style="margin:0;" onsubmit="return confirm('Delete team ' + this.delete_team.value + '?');">
           <input type="hidden" name="_csrf" value="${esc(CSRF)}">
           <input type="hidden" name="delete_team" value="${esc(team.name)}">
@@ -554,8 +582,10 @@ for (const id of ['late-minutes', 'late-void', 'late-dq-void']) {
 }
 // Delegated: the teams table is re-rendered by the 15s poll.
 teamsTable.addEventListener('click', e => {
-  const btn = e.target.closest('.late-btn');
-  if (btn) openLate(btn.dataset.team);
+  const late = e.target.closest('.late-btn');
+  if (late) { openLate(late.dataset.team); return; }
+  const infr = e.target.closest('.infraction-btn');
+  if (infr) openInfraction(infr.dataset.team);
 });
 
 // Live preview of what saving would do, so the ruling is never a surprise.
@@ -591,6 +621,67 @@ async function saveLate() {
   if (!j.success) { toast(j.message || 'Could not save', true); return; }
   closeLate();
   toast(j.ruling);
+  loadTeams();
+}
+
+// ── Infraction penalties ──────────────────────────────────────────────────
+// Free-form point deductions for reported rule-breaking. No tariff to mirror:
+// the admin names the points, the server just stores them positive. Each
+// deduction is its own row so it can be undone on its own.
+
+const infractionModal = document.getElementById('infractionModal');
+
+function openInfraction(name) {
+  document.getElementById('infraction-team').value = name;
+  document.getElementById('infraction-team-label').textContent = name.replace(/_/g, ' ');
+  document.getElementById('infraction-points').value  = '';
+  document.getElementById('infraction-reason').value  = '';
+  document.getElementById('infraction-list').innerHTML = 'Loading…';
+  infractionModal.classList.remove('hidden');
+  fetch(`${BASE}/api/get_infractions.php?team=${encodeURIComponent(name)}`)
+    .then(r => r.json())
+    .then(j => renderInfractions(j.success ? j.infractions : []));
+}
+function closeInfraction() { infractionModal.classList.add('hidden'); }
+document.querySelector('.close-infraction').onclick = closeInfraction;
+infractionModal.onclick = e => { if (e.target === infractionModal) closeInfraction(); };
+document.getElementById('infraction-save').onclick = saveInfraction;
+
+function renderInfractions(list) {
+  const el = document.getElementById('infraction-list');
+  if (!list || list.length === 0) { el.innerHTML = '<em>None recorded.</em>'; return; }
+  el.innerHTML = list.map(i => `
+    <div style="display:flex; align-items:center; gap:8px; padding:4px 0;
+                border-bottom:1px solid rgba(128,128,128,.2);">
+      <span style="color:#c00; font-weight:600; min-width:4em;">−${i.points}</span>
+      <span style="flex:1;">${esc(i.reason || '(no reason given)')}
+        <span class="small" style="opacity:.7;">${esc(i.created_at)}</span></span>
+      <button type="button" class="secondary undo-infraction" data-id="${i.id}">Undo</button>
+    </div>`).join('');
+}
+
+// Delegated: the list is re-rendered after every add/undo.
+document.getElementById('infraction-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.undo-infraction');
+  if (!btn) return;
+  const j = await jsonPost(`${BASE}/api/delete_infraction.php`, { id: Number(btn.dataset.id) });
+  if (!j.success) { toast(j.message || 'Could not undo', true); return; }
+  renderInfractions(j.infractions);
+  toast('Deduction removed');
+  loadTeams();
+});
+
+async function saveInfraction() {
+  const j = await jsonPost(`${BASE}/api/add_infraction.php`, {
+    team:   document.getElementById('infraction-team').value,
+    points: document.getElementById('infraction-points').value,
+    reason: document.getElementById('infraction-reason').value,
+  });
+  if (!j.success) { toast(j.message || 'Could not save', true); return; }
+  document.getElementById('infraction-points').value = '';
+  document.getElementById('infraction-reason').value = '';
+  renderInfractions(j.infractions);
+  toast(`−${j.points} pts recorded (${j.total} total)`);
   loadTeams();
 }
 

@@ -74,6 +74,24 @@ function ensure_schema_upgrades(PDO $pdo): void {
             }
             $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','6') ON DUPLICATE KEY UPDATE v=VALUES(v)");
         }
+        if ($v < 7) {
+            // Ad-hoc point deductions for reported infractions — a log, so a
+            // team can collect several and each stays individually reversible.
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS infractions (
+                   id         INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                   team_id    INT UNSIGNED NOT NULL,
+                   points     INT UNSIGNED NOT NULL DEFAULT 0,
+                   reason     VARCHAR(255) NULL,
+                   created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                   PRIMARY KEY (id),
+                   KEY idx_team (team_id),
+                   CONSTRAINT fk_infractions_team FOREIGN KEY (team_id)
+                     REFERENCES teams(id) ON DELETE CASCADE
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+            $pdo->exec("INSERT INTO settings (k,v) VALUES ('db_schema_v','7') ON DUPLICATE KEY UPDATE v=VALUES(v)");
+        }
     } catch (Throwable $e) {
         // Non-fatal: app continues; admin can re-run migrate.php if needed.
     }
@@ -155,6 +173,41 @@ function sql_late_dq(string $t = 't'): string {
 /** Columns every score query needs from `teams` in its GROUP BY. */
 function sql_late_group_by(string $t = 't'): string {
     return "$t.late_minutes, $t.late_void, $t.dq_void";
+}
+
+// ── Infraction penalties ──────────────────────────────────────────────────
+// Ad-hoc deductions an admin records against a team for a reported infraction
+// (leaving the group, unsafe driving, arguing with a judge…). Unlike the late
+// tariff there is no formula — the admin names the points. Each infraction is
+// its own row so several can accumulate and any one can be undone without
+// disturbing the others; nothing is ever edited in place.
+//
+// Points are stored positive; scoring subtracts the SUM.
+
+const INFRACTION_MAX_POINTS = 9999; // sanity cap on a single deduction
+
+/** Total infraction points recorded against a team. */
+function infraction_total(int $team_id): int {
+    $st = db()->prepare('SELECT COALESCE(SUM(points), 0) FROM infractions WHERE team_id = ?');
+    $st->execute([$team_id]);
+    return (int)$st->fetchColumn();
+}
+
+/** Every infraction against a team, newest first. */
+function infractions_for(int $team_id): array {
+    $st = db()->prepare(
+        'SELECT id, points, reason, created_at FROM infractions
+          WHERE team_id = ? ORDER BY created_at DESC, id DESC'
+    );
+    $st->execute([$team_id]);
+    return $st->fetchAll();
+}
+
+/** SQL mirror of infraction_total() for score queries. Correlated on purpose:
+ *  a JOIN would multiply the submission rows the score SUMs over. $t is the
+ *  alias of the `teams` table in the outer query. */
+function sql_infraction_deduction(string $t = 't'): string {
+    return "(SELECT COALESCE(SUM(i.points), 0) FROM infractions i WHERE i.team_id = $t.id)";
 }
 
 // ── Starter-task gate ─────────────────────────────────────────────────────

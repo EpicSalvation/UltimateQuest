@@ -169,6 +169,10 @@ $late_minutes   = isset($late['late_minutes']) ? (int)$late['late_minutes'] : nu
 $late_deduction = late_deduction($late_minutes, !empty($late['late_void']));
 $is_dq          = late_disqualified($late_minutes, !empty($late['dq_void']));
 
+// Infraction penalties an admin recorded against this team.
+$infractions        = infractions_for($team_id);
+$infraction_penalty = infraction_total($team_id);
+
 $total_tasks    = count($task_list);
 $approved_count = count(array_filter($task_list, fn($t) => $t['status'] === 'approved'));
 $pending_count  = count(array_filter($task_list, fn($t) => $t['status'] === 'pending'));
@@ -239,6 +243,8 @@ function format_phone_display(string $raw): string {
     <span style="color:#c00; font-weight:600;">(−<?=$penalty_outstanding?>)</span>
   <?php endif; ?><?php if ($late_deduction > 0): ?>
     <span style="color:#c00; font-weight:600;">(−<?=$late_deduction?> late)</span>
+  <?php endif; ?><?php if ($infraction_penalty > 0): ?>
+    <span style="color:#c00; font-weight:600;">(−<?=$infraction_penalty?> penalty)</span>
   <?php endif; ?><br>
   <strong>Pending:</strong> <?=$pending?> pts</p>
   <?php if ($late_deduction > 0 || $is_dq): ?>
@@ -246,6 +252,25 @@ function format_phone_display(string $raw): string {
     ⏰ Your team was logged back at homebase <strong><?=$late_minutes?> minute<?=$late_minutes === 1 ? '' : 's'?></strong> late.
     <?php if ($late_deduction > 0): ?><?=$late_deduction?> points have been deducted.<?php endif; ?>
     <?php if ($is_dq): ?><strong>Your team is currently disqualified.</strong><?php endif; ?>
+    Talk to an event leader if you think this is wrong.
+  </p>
+  <?php endif; ?>
+  <?php if ($infraction_penalty > 0): ?>
+  <p class="small" style="margin:4px 0 0; color:#c00;">
+    ⚠️ <strong><?=$infraction_penalty?> point<?=$infraction_penalty === 1 ? '' : 's'?></strong>
+    deducted for reported infractions:
+  </p>
+  <ul class="small" style="margin:2px 0 0; color:#c00;">
+    <?php foreach ($infractions as $inf): ?>
+      <li>−<?=(int)$inf['points']?>
+        <?php if (!empty($inf['reason'])): ?>
+          for <?=htmlspecialchars($inf['reason'])?>
+        <?php endif; ?>
+        <span class="small">(<?=date('g:i A', strtotime($inf['created_at']))?>)</span>
+      </li>
+    <?php endforeach; ?>
+  </ul>
+  <p class="small" style="margin:2px 0 0; color:#c00;">
     Talk to an event leader if you think this is wrong.
   </p>
   <?php endif; ?>

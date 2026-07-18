@@ -90,12 +90,15 @@ foreach ($status_counts as $row) $status_map[$row['status']] = (int)$row['c'];
 // ----- Game metrics -----
 // Net score = SUM(approved: points + penalty) - SUM(all task penalties):
 // every task's penalty counts against a team until that task is approved.
-// The late-arrival deduction comes off that net; a disqualified team scores 0.
+// The late-arrival and infraction deductions come off that net; a disqualified
+// team scores 0.
 $late_ded = sql_late_deduction('t');
 $late_dq  = sql_late_dq('t');
+$infr_ded = sql_infraction_deduction('t');
 
 $per_team = $pdo->query(
     "SELECT t.name, t.late_minutes, t.late_void, t.dq_void,
+            $infr_ded AS infraction_deduction,
             SUM(s.status='approved') AS approved,
             SUM(s.status='pending')  AS pending,
             SUM(s.status='rejected') AS rejected,
@@ -105,7 +108,7 @@ $per_team = $pdo->query(
             $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END),0)
               - (SELECT COALESCE(SUM(penalty),0) FROM tasks)
-              - $late_ded AS net,
+              - $late_ded - $infr_ded AS net,
             GREATEST(COALESCE(MAX(s.submitted_at),'1970-01-01'),
                      COALESCE(MAX(s.reviewed_at), '1970-01-01')) AS last_activity
        FROM teams t
@@ -297,7 +300,7 @@ if (is_file($err_log)) {
       <tr><th>Team</th>
           <th class="num">✅</th><th class="num">🕓</th><th class="num">❌</th>
           <th class="num">Awarded</th><th class="num">Pending pts</th>
-          <th>Late</th><th class="num">Net score</th>
+          <th>Late</th><th class="num">Infractions</th><th class="num">Net score</th>
           <th>Last activity</th></tr>
       <?php foreach ($per_team as $r): ?>
         <?php $dq = (int)$r['disqualified'] === 1; ?>
@@ -311,6 +314,7 @@ if (is_file($err_log)) {
           <td class="small"><?=htmlspecialchars(late_ruling_text(
                 $r['late_minutes'] === null ? null : (int)$r['late_minutes'],
                 (bool)$r['late_void'], (bool)$r['dq_void']))?></td>
+          <td class="num"><?= (int)$r['infraction_deduction'] > 0 ? '−' . (int)$r['infraction_deduction'] : '—' ?></td>
           <td class="num"><strong><?= $dq ? 0 : (int)$r['net'] ?></strong></td>
           <td><?=$r['last_activity'] && substr($r['last_activity'],0,4)!=='1970' ? htmlspecialchars($r['last_activity']) : '—'?></td>
         </tr>

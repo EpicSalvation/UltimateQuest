@@ -38,19 +38,21 @@ $pdo = db();
 
 // score is the net result: approved points minus the penalty of every task the
 // team did not complete (SUM(approved: points + penalty) - SUM(all penalties)).
-// The late-arrival deduction comes off that net; disqualified teams score 0
-// and sort last. The minutes and challenge voids are archived alongside so the
-// final standings can be re-derived from the dump.
+// The late-arrival and infraction deductions come off that net; disqualified
+// teams score 0 and sort last. The minutes, challenge voids and the infraction
+// log are archived alongside so the final standings can be re-derived.
 $late_ded = sql_late_deduction('t');
 $late_dq  = sql_late_dq('t');
+$infr_ded = sql_infraction_deduction('t');
 
 $leaderboard = $pdo->query(
     "SELECT t.id, t.name, t.display_name, t.late_minutes, t.late_void, t.dq_void, t.late_note,
             $late_ded AS late_deduction,
+            $infr_ded AS infraction_deduction,
             $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
               - (SELECT COALESCE(SUM(penalty), 0) FROM tasks)
-              - $late_ded AS score,
+              - $late_ded - $infr_ded AS score,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points ELSE 0 END), 0) AS points_awarded,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN 1 ELSE 0 END), 0) AS approved,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN 1 ELSE 0 END), 0) AS pending,
@@ -96,6 +98,7 @@ $tasks_dump          = $pdo->query("SELECT id, title, description, points, penal
 $submissions_dump    = $pdo->query("SELECT id, team_id, task_id, status, note, submitted_at, reviewed_at FROM submissions ORDER BY id")->fetchAll();
 $submission_files_dp = $pdo->query("SELECT id, submission_id, filename, mime_type, byte_size, has_thumb, created_at FROM submission_files ORDER BY id")->fetchAll();
 $settings_dump       = $pdo->query("SELECT k, v FROM settings WHERE k <> 'admin_password_hash' ORDER BY k")->fetchAll();
+$infractions_dump    = $pdo->query("SELECT id, team_id, points, reason, created_at FROM infractions ORDER BY id")->fetchAll();
 
 // ---- Write results.json + manifest + game_data + results.html ------------
 
@@ -136,6 +139,7 @@ $game_data = [
     'submissions'      => $submissions_dump,
     'submission_files' => $submission_files_dp,
     'settings'         => $settings_dump,
+    'infractions'      => $infractions_dump,
 ];
 
 file_put_contents($archive_dir . '/results.json',  json_encode($results,  JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
@@ -151,7 +155,7 @@ $html .= "<h1>The Ultimate Quest — Game " . htmlspecialchars($label) . "</h1>"
 $html .= "<p class='muted'>Ended " . htmlspecialchars($results['ended_at']) . " ET. ";
 $html .= "Submissions: {$counts_by_status['approved']} approved · {$counts_by_status['rejected']} rejected · {$counts_by_status['pending']} pending. ";
 $html .= "{$results['files_count']} files / " . number_format($results['files_bytes']) . " bytes.</p>";
-$html .= "<h2>Leaderboard</h2><table><tr><th>Rank</th><th>Team</th><th>Score</th><th>Late</th><th>Approved</th><th>Rejected</th></tr>";
+$html .= "<h2>Leaderboard</h2><table><tr><th>Rank</th><th>Team</th><th>Score</th><th>Late</th><th>Penalties</th><th>Approved</th><th>Rejected</th></tr>";
 foreach ($leaderboard as $i => $r) {
     $dq   = (int)$r['disqualified'] === 1;
     $late = late_ruling_text(
@@ -161,6 +165,7 @@ foreach ($leaderboard as $i => $r) {
     $html .= '<tr><td>' . ($dq ? '—' : $i + 1) . '</td><td>' . htmlspecialchars($r['display_name'] ?: $r['name'])
           . ($dq ? ' <strong>(DISQUALIFIED)</strong>' : '')
           . '</td><td>' . (int)$r['score'] . '</td><td>' . htmlspecialchars($late)
+          . '</td><td>' . ((int)$r['infraction_deduction'] > 0 ? '−' . (int)$r['infraction_deduction'] : '')
           . '</td><td>' . (int)$r['approved'] . '</td><td>' . (int)$r['rejected'] . '</td></tr>';
 }
 $html .= "</table><h2>Per-task</h2><table><tr><th>Task</th><th>Points</th><th>Penalty</th><th>Approved</th><th>Rejected</th></tr>";
@@ -188,6 +193,9 @@ try {
     $pdo->beginTransaction();
     $pdo->exec('DELETE FROM submission_files');
     $pdo->exec('DELETE FROM submissions');
+    // Infractions belong to the game that just ended (archived above), so they
+    // go regardless of whether the teams themselves survive.
+    $pdo->exec('DELETE FROM infractions');
     if ($delete_teams) $pdo->exec('DELETE FROM teams');
     // Late-arrival rulings belong to the game that just ended — clear them off
     // any teams that survive into the next one.

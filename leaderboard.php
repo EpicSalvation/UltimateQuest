@@ -14,17 +14,20 @@ if (!$isAdmin && setting('reveal_leaderboard') !== '1') {
 
 // Net score: approved points minus the penalty of every task the team has
 // not (yet) completed — i.e. SUM(approved: points + penalty) - SUM(all penalties).
-// …minus the late-arrival deduction. Disqualified teams score 0 and sort last.
+// …minus the late-arrival and infraction deductions. Disqualified teams score
+// 0 and sort last.
 $late_ded = sql_late_deduction('t');
 $late_dq  = sql_late_dq('t');
+$infr_ded = sql_infraction_deduction('t');
 
 $rows = db()->query(
     "SELECT t.name, t.late_minutes,
             $late_ded AS late_deduction,
+            $infr_ded AS infraction_deduction,
             $late_dq  AS disqualified,
             COALESCE(SUM(CASE WHEN s.status='approved' THEN tk.points + tk.penalty ELSE 0 END), 0)
               - (SELECT COALESCE(SUM(penalty), 0) FROM tasks)
-              - $late_ded AS score,
+              - $late_ded - $infr_ded AS score,
             COALESCE(SUM(CASE WHEN s.status='pending'  THEN tk.points ELSE 0 END), 0) AS pending,
             MAX(s.reviewed_at) AS last_reviewed
        FROM teams t
@@ -56,8 +59,9 @@ $rows = db()->query(
         </div>
         <div class="score"><?= $dq ? '0' : (int)$r['score'] ?> pts</div>
         <div class="time small">
-          <?php if ((int)$r['late_deduction'] > 0): ?>
-            ⏰ −<?=(int)$r['late_deduction']?> late
+          <?php if ((int)$r['late_deduction'] > 0 || (int)$r['infraction_deduction'] > 0): ?>
+            <?php if ((int)$r['late_deduction'] > 0): ?>⏰ −<?=(int)$r['late_deduction']?> late<?php endif; ?>
+            <?php if ((int)$r['infraction_deduction'] > 0): ?>⚠️ −<?=(int)$r['infraction_deduction']?> penalty<?php endif; ?>
           <?php elseif ((int)$r['pending'] > 0): ?>
             🕓 <?=(int)$r['pending']?> pts pending
           <?php else: ?>
