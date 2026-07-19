@@ -58,11 +58,15 @@ The five places that derive a score and must stay in step: `team.php`, `leaderbo
 
 ## Thumbnails
 
-Admin previews load thumbnails, not full files — this is the main perceived-speed lever. `lib/thumbs.php` provides `generate_thumb($src, $dest, $mime)`:
+Admin previews load thumbnails, not full files — this is the main perceived-speed lever. `lib/thumbs.php` provides `process_upload_image($upload_dir, $fname, $mime)`, which does EXIF/GPS strip, orientation baking, HEIC→JPEG transcode, and the thumbnail from **one full-resolution decode** (this single-pass shape is a CPU guard, not a style choice — the old strip-then-thumb double decode plus HEIC re-encode pegged the shared host during the event):
 
-- JPEG/PNG/WebP via GD, resized to 400px wide, JPEG q80, with EXIF orientation handling.
-- HEIC/HEIF via Imagick when the HEIC delegate is present (`thumbs_can_heic()` static-cached). When unavailable, `has_thumb=false` is recorded; admin UI shows an "Open full file" link for that file.
+- JPEG + HEIC/HEIF via Imagick when present: strip + thumb in one pass. **HEIC is stored back as full-size JPEG (q85)** — never re-encode HEIC (x265, minutes of CPU per photo). The DB row records the renamed `.jpg` filename and `image/jpeg` mime.
+- `imagick_limits()` caps Imagick before any decode (1 thread, 256M memory / 512M map, 60s per op) — Imagick's pixel cache is native memory outside PHP's `memory_limit`, and unbounded OpenMP threads under concurrent uploads is what crashed the site. Keep this called before every `new Imagick`.
+- JPEG/PNG/WebP without Imagick fall back to GD thumbs (no strip), resized to 400px wide, JPEG q80, with EXIF orientation handling; GD decode is skipped above `GD_MAX_PIXELS` (~60 MP) to stay under `memory_limit`.
+- HEIC without the delegate (`thumbs_can_heic()` static-cached): kept as HEIC, `has_thumb=false`; admin UI shows an "Open full file" link for that file.
 - Videos are not thumbnailed; admin modal lazy-loads `<video preload="metadata">` only after the user expands a tile.
+
+`task_submit.php` also caps accepted files per POST at `photos_required + videos_required` — the POST body is client-controlled, so the cap is what bounds per-request image-processing work.
 
 Thumbs are written to `uploads/<team>/<task_id>/thumbs/<filename>.jpg` (extension always replaced with `.jpg`, see `thumb_path_for()`). Generation is synchronous in `task_submit.php` after `move_uploaded_file`; failures log to `upload_errors.log` and are non-fatal. `api/thumb.php` is admin-gated and serves them with a 1h private cache.
 

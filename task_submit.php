@@ -78,10 +78,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
     $accepted = []; // [['filename','mime','bytes','has_thumb'], ...]
     $upload_errors = [];
 
+    // The form only renders photos_required + videos_required inputs, but the
+    // POST body is client-controlled — cap how many files get the expensive
+    // image processing below, or one crafted request can peg the CPU.
+    $max_files = max(1, $num_photos + $num_videos);
+
     foreach (($_FILES['upload']['tmp_name'] ?? []) as $i => $tmp) {
         $name = $_FILES['upload']['name'][$i]  ?? 'unknown';
         $err  = $_FILES['upload']['error'][$i] ?? UPLOAD_ERR_OK;
 
+        if (count($accepted) >= $max_files) { $upload_errors[] = "$name (over the {$max_files}-file limit)"; continue; }
         if ($err !== UPLOAD_ERR_OK) { $upload_errors[] = "$name (error $err)"; continue; }
         if (!is_uploaded_file($tmp)) { $upload_errors[] = "$name (not uploaded)"; continue; }
 
@@ -106,17 +112,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $status !== 'approved') {
             $upload_errors[] = "$name (move failed)"; continue;
         }
 
-        // Strip GPS / EXIF metadata in place before generating the thumb,
-        // so both the original on disk and the thumb are clean.
-        strip_exif($dest, $type);
-
-        $thumb_ok = generate_thumb($dest, thumb_path_for($upload_dir, $fname), $type);
+        // One pass: strip GPS/EXIF, bake orientation, transcode HEIC to JPEG
+        // (never re-encode HEIC — that runs x265 and melts the CPU), and
+        // generate the thumb from the same decode. May rename the file.
+        $res = process_upload_image($upload_dir, $fname, $type);
 
         $accepted[] = [
-            'filename'  => $fname,
-            'mime'      => $type,
-            'bytes'     => filesize($dest) ?: 0,
-            'has_thumb' => $thumb_ok ? 1 : 0,
+            'filename'  => $res['filename'],
+            'mime'      => $res['mime'],
+            'bytes'     => filesize("$upload_dir/{$res['filename']}") ?: 0,
+            'has_thumb' => $res['has_thumb'] ? 1 : 0,
         ];
     }
 
